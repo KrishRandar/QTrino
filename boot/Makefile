@@ -1,13 +1,23 @@
-BUILD_DIR?=../build/
+BUILD_DIR?=../build/sim/
 
 include $(BUILD_DIR)/software/include/generated/variables.mak
 include $(SOC_DIRECTORY)/software/common.mak
 
 #Wolf includes
 
-SRCS += $(wildcard wolfcrypt/src/*.c)
-OBJECTS  = crt0.o main.o
-OBJECTS += $(SRCS:.c=.o)
+# Compile all wolfcrypt sources
+WOLFCRYPT_SRCS = $(wildcard wolfcrypt/src/*.c)
+
+# Compile all wolfssl sources (for DTLS support)
+WOLFSSL_SRCS = $(wildcard wolfssl/src/*.c)
+
+# Main objects
+OBJECTS  = crt0.o main.o network.o
+
+# Add wolfcrypt and wolfssl objects
+OBJECTS += $(WOLFCRYPT_SRCS:.c=.o)
+OBJECTS += $(WOLFSSL_SRCS:.c=.o)
+
 INC  = -I./wolfssl -I./wolfssl/wolfcrypt -I.
 
 all: boot.bin

@@ -5972,7 +5972,7 @@ struct WOLFSSL {
     byte            peerEccDsaKeyPresent;
 #endif
 #if defined(HAVE_ECC) || defined(HAVE_ED25519) || \
-    defined(HAVE_CURVE448) || defined(HAVE_ED448)
+    defined(HAVE_CURVE448) || defined(HAVE_ED448) || defined(HAVE_DILITHIUM)
     word32          pkCurveOID;              /* curve Ecc_Sum     */
 #endif
 #ifdef HAVE_ED25519

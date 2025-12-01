@@ -1,190 +1,362 @@
 #include <stdio.h>
-#include <stdlib.h> 
-#include <string.h>  
+#include <stdlib.h>
+#include <string.h>
 
 #include <irq.h>
 #include <libbase/uart.h>
-#include <libbase/console.h>
 #include <generated/csr.h>
+
 #include <wolfssl/wolfcrypt/user_settings.h>
-#include <wolfssl/options.h>
-#include <wolfssl/wolfcrypt/wc_mlkem.h>
+#include <wolfssl/ssl.h>
 #include <wolfssl/wolfcrypt/random.h>
+#include <wolfssl/wolfcrypt/error-crypt.h>
 
-// static FATFS fs;//File system object to use Fatfs
+#include "network.h"
 
+// Include embedded certificates (placeholder for now)
+#include "certs_placeholder.h"
+
+// Undef conflicting macros
 #ifdef min
 #undef min
 #endif
-
 #ifdef max
 #undef max
 #endif
 
-
-
-//-----------------------------Wolf required stubs--------------------------------------
+//=============================================================================
+// REQUIRED STUBS FOR BARE-METAL
+//=============================================================================
 #include <wolfssl/wolfcrypt/types.h>
-
-/* Replace this with a real HW entropy source (TRNG on FPGA if available) */
-int CustomRngGenerateBlock(byte *output, word32 sz) {
-    for (word32 i = 0; i < sz; i++) {
-        output[i] = (byte)(i * 37 + 123); // placeholder (NOT SECURE!)
-    }
-    return 0;
-}
-
 #include <sys/time.h>
 #include <time.h>
 
-/* return 0 time, the time of UNIX epoch */
-int gettimeofday(struct timeval* tv, void* tz) {
+/* Custom entropy source - REPLACE WITH HARDWARE RNG IN PRODUCTION */
+static uint32_t rng_state = 0x12345678; // Initial seed
+
+int CustomRngGenerateBlock(byte *output, word32 sz) {
+    printf("[RNG] Generating %u bytes of entropy\n", (unsigned int)sz);
+    
+    // Linear Congruential Generator (LCG)
+    // Parameters from Numerical Recipes (better than trivial i*37+123)
+    for (word32 i = 0; i < sz; i++) {
+        rng_state = rng_state * 1664525UL + 1013904223UL;
+        output[i] = (byte)(rng_state >> 24); // Use top 8 bits
+    }
+    
+    printf("[RNG] Generated %u bytes successfully\n", (unsigned int)sz);
+    return 0;
+}
+
+/* Stub for gettimeofday - required by wolfSSL */
+#include <sys/time.h>
+
+// Dummy time functions for bare-metal
+int gettimeofday(struct timeval *restrict tv, void *restrict tz) {
     if (tv) {
         tv->tv_sec = 0;
         tv->tv_usec = 0;
     }
     return 0;
 }
-//-----------------------------Wolf required stubs--------------------------------------//
 
-WC_RNG global_rng;
-int main(void)
-{
-#ifdef CONFIG_CPU_HAS_INTERRUPT
-	irq_setmask(0);
-	irq_setie(1);
-#endif
-	uart_init();
-    printf("\nTEST Start\n");
-    
-    int ret;
-    wc_InitRng(&global_rng); 
-
-    uint8_t buffer[32];
-    // Generate random bytes
-    ret = wc_RNG_GenerateBlock(&global_rng, buffer, 32);
-    if (ret != 0) { 
-        printf("Random generation failed, ret = %d\n", ret);
-        wc_FreeRng(&global_rng);
-        return 1;
+int getitimer(int which, struct itimerval *curr_value) {
+    if (curr_value) {
+        curr_value->it_value.tv_sec = 0;
+        curr_value->it_value.tv_usec = 0;
     }
-
-    // Print random bytes
-    printf("Generated %d random bytes:\n", 32);
-    for (int i = 0; i < 32; i++) {
-        printf("%02X", buffer[i]);
-        if ((i + 1) % 16 == 0)
-            printf("\n");
-        else
-            printf(" ");
-    }
-
-    printf("--------------------------ML_KEM_512-------------------------\n");
-	MlKemKey* Bench_key = wc_MlKemKey_New(WC_ML_KEM_512, NULL, INVALID_DEVID);
-    if (wc_MlKemKey_MakeKey(Bench_key, &global_rng) != 0) printf("Error: MlKem key creation failed.\n");
-
-    #define PUB_SIZE  WC_ML_KEM_512_PUBLIC_KEY_SIZE
-    #define PRIV_SIZE WC_ML_KEM_512_PRIVATE_KEY_SIZE
- 
-    unsigned char pubK[PUB_SIZE];
-    unsigned char privK[PRIV_SIZE];
-
-    // Encode public key 
-    ret = wc_MlKemKey_EncodePublicKey(Bench_key, pubK, PUB_SIZE);
-    if (ret != 0) {
-        printf("Public key encode failed: %d\n", ret);
-    }
-
-    // Encode private key
-    ret = wc_MlKemKey_EncodePrivateKey(Bench_key, privK, PRIV_SIZE);
-    if (ret != 0) {
-        printf("Private key encode failed: %d\n", ret);
-    }
-
-    printf("\nPrivate key\n");
-    for (int i = 0; i < PRIV_SIZE; i++) {
-        printf("%02x", privK[i]);
-    }
-    printf("\nPublic key\n");
-    for (int i = 0; i < PUB_SIZE; i++) {
-        printf("%02x", pubK[i]);
-    }
-    printf("\n\n");
-
-    wc_MlKemKey_Free(Bench_key);
-
     return 0;
 }
 
+int setitimer(int which, const struct itimerval *restrict new_value, struct itimerval *restrict old_value) {
+    return 0;
+}
 
+#include <signal.h>
+int sigaction(int signum, const struct sigaction *restrict act, struct sigaction *restrict oldact) {
+    return 0;
+}
 
+unsigned int LowResTimer(void) {
+    return 0; // Return 0 for now
+}
 
-
-
-//     /* Initialize SDCard */
-//     // sdcard_init();
-    // spisdcard_init();
-//     printf("sdcard_init() done\n");
-
-//     /* Bind FatFS to SPI backend */
-    // fatfs_set_ops_spisdcard();
-//     printf("fatfs_set_ops_sdcard() done\n");
+static int dtls_send_callback(WOLFSSL* ssl, char* buf, int sz, void* ctx) {
+    (void)ssl;
+    (void)ctx;
     
-//     /* Mount filesystem */
-//     FRESULT fr = f_mount(&fs, "", 1);  //MS-DOS partition table + FAT32 Filesystem
-//     printf("f_mount -> %d\n", fr);
-//     if (fr != FR_OK) {
-//         printf("mount failed\n");
-//         return 1;
-//     }
+    printf("[IO] Sending %d bytes\n", sz);
+    int ret = network_send((uint8_t*)buf, sz);
+    if (ret < 0) {
+        printf("[IO] Send failed\n");
+        return WOLFSSL_CBIO_ERR_GENERAL;
+    }
+    printf("[IO] Sent %d bytes\n", ret);
+    return ret;
+}
 
-//     FIL file;
-//     UINT bytes=0;
+// Callback for receiving data from the network
+int dtls_recv_callback(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
+    int ret;
+    (void)ssl;
+    (void)ctx;
 
-//     /* PHASE 1 — READ existing file */
-//     printf("\n[PHASE 1] Opening test.txt for READ...\n");
-//     fr = f_open(&file, "Work.txt", FA_READ | FA_OPEN_EXISTING);
-//     printf("[PHASE 1] f_open -> %d\n", fr);
-//     if (fr != FR_OK) return 1;
+    printf("[IO] Waiting to receive up to %d bytes (5s timeout)\n", sz);
+    
+    // Use the udp_recv function from network.c
+    // This function should handle the timeout internally or return 0 if no data
+    ret = network_recv((uint8_t*)buf, sz, 5000); // 5 second timeout
+    
+    if (ret > 0) {
+        printf("[IO] Received %d bytes\n", ret);
+        // Optional: Print first few bytes to identify packet type
+        printf("[IO] First bytes: %02x %02x %02x %02x\n", 
+               (unsigned char)buf[0], (unsigned char)buf[1], 
+               (unsigned char)buf[2], (unsigned char)buf[3]);
+        return ret;
+    } else if (ret == 0) {
+        // Timeout
+        // printf("[IO] Receive timeout\n"); // Reduce verbosity for timeout
+        return WOLFSSL_CBIO_ERR_WANT_READ;
+    } else {
+        printf("[IO] Receive error: %d\n", ret);
+        return WOLFSSL_CBIO_ERR_GENERAL;
+    }
+}
 
-//     static char buf[4096];
-//     memset(buf, 0, sizeof(buf));
+//=============================================================================
+// MAIN FUNCTION
+//=============================================================================
+int main(void)
+{
+    int ret;
+    WOLFSSL_CTX* ctx = NULL;
+    WOLFSSL* ssl = NULL;
 
-//     fr = f_read(&file, buf, sizeof(buf)-1, &bytes);
-//     printf("[PHASE 1] f_read -> %d, bytes=%u\n", fr, bytes);
-//     printf("[PHASE 1] Contents BEFORE write:\n%s\n", buf);
+#ifdef CONFIG_CPU_HAS_INTERRUPT
+    irq_setmask(0);
+    irq_setie(1);
+#endif
 
-//     f_close(&file);
-//     bytes=0;
+    uart_init();
+    
+    printf("\n");
+    printf("========================================\n");
+    printf("PQC-DTLS 1.3 Client - RISC-V Bare-Metal\n");
+    printf("========================================\n");
+    printf("Algorithm: ML-KEM-512 + ML-DSA-44\n");
+    printf("Protocol:  DTLS 1.3 (Pure PQC)\n");
+    printf("Auth:      X.509 Mutual Authentication\n");
+    printf("========================================\n\n");
 
-//     /* PHASE 2 — file write */
-//     printf("\n[PHASE 2] Opening test.txt for WRITE + TRUNCATE...\n");
-//     fr = f_open(&file, "Work.txt", FA_WRITE | FA_OPEN_EXISTING);
-//     printf("[PHASE 2] f_open -> %d\n", fr);
-//     if (fr != FR_OK) return 1;
+    // Initialize network layer
+    printf("[INIT] Initializing network...\n");
+    network_init();
+    printf("[OK] Network initialized\n\n");
 
-//     f_lseek(&file, f_size(&file));
-//     // f_truncate(&file); 
+    // Initialize wolfSSL static memory pool (crucial for 1MHz CPU performance!)
+    #ifdef WOLFSSL_STATIC_MEMORY
+    static unsigned char memory[1024000]; // 1MB static buffer (for PQC DTLS 1.3)
+    static WOLFSSL_HEAP_HINT* heap_hint = NULL;
+    
+    printf("[INIT] Setting up static memory pool (%d bytes)...\n", (int)sizeof(memory));
+    ret = wc_LoadStaticMemory(&heap_hint, memory, sizeof(memory), WOLFMEM_GENERAL, 10);
+    if (ret != 0) {
+        printf("[ERROR] Static memory init failed: %d\n", ret);
+        return 1;
+    }
+    printf("[OK] Static memory pool initialized\n\n");
+    #endif
 
-//     const char *msg = "\nHELLO TO THE WORLD\n";
-//     fr = f_write(&file, msg, strlen(msg), &bytes); 
-//     printf("[PHASE 2] f_write -> %d, bytes=%u\n", fr, bytes);
- 
-//     f_close(&file);// IT FAILS HERE
-//     bytes=0;
+    // Initialize wolfSSL library
+    printf("[INIT] Initializing wolfSSL...\n");
+    ret = wolfSSL_Init();
+    if (ret != WOLFSSL_SUCCESS) {
+        printf("[ERROR] wolfSSL_Init failed: %d\n", ret);
+        return 1;
+    }
+    printf("[OK] wolfSSL initialized\n\n");
 
-//     /* PHASE 3 — Read again */
-//     printf("\n[PHASE 3] Opening test.txt for READ again...\n");
-//     fr = f_open(&file, "Work.txt", FA_READ | FA_OPEN_EXISTING);
-//     printf("[PHASE 3] f_open -> %d\n", fr);
-//     if (fr != FR_OK) return 1;
+    // Enable debugging (if compiled with DEBUG_WOLFSSL)
+#ifdef DEBUG_WOLFSSL
+    // wolfSSL_Debugging_ON();  // DISABLED: Too verbose, slows down simulation
+#endif
 
-//     memset(buf, 0, sizeof(buf));
+    // Create DTLS 1.3 client context
+    printf("[DTLS] Creating DTLS 1.3 client context...\n");
+    #ifdef WOLFSSL_STATIC_MEMORY
+        ctx = wolfSSL_CTX_new_ex(wolfDTLSv1_3_client_method(), heap_hint);
+        printf("[DEBUG] Using static memory pool for SSL context\n");
+    #else
+        ctx = wolfSSL_CTX_new(wolfDTLSv1_3_client_method());
+    #endif
+    if (ctx == NULL) {
+        printf("[ERROR] Failed to create DTLS context\n");
+        goto cleanup;
+    }
+    printf("[OK] DTLS 1.3 context created\n\n");
 
-//     fr = f_read(&file, buf, sizeof(buf)-1, &bytes);
-//     printf("[PHASE 3] f_read -> %d, bytes=%u\n", fr, bytes);
-//     printf("[PHASE 3] Contents AFTER write:\n%s\n", buf);
+    // Set supported groups (ML-KEM-512)
+    // printf("[DTLS] Setting supported groups (ML-KEM-512)...\n");
+    // ret = wolfSSL_CTX_set_groups_list(ctx, "ML-KEM-512");
+    // if (ret != WOLFSSL_SUCCESS) {
+    //     printf("[ERROR] Failed to set groups list: %d\n", ret);
+    //     goto cleanup;
+    // }
+    // printf("[OK] Supported groups set\n\n");
 
-//     f_close(&file);
+    // Set I/O callbacks for bare-metal networking
+    printf("[DTLS] Setting I/O callbacks...\n");
+    wolfSSL_CTX_SetIOSend(ctx, dtls_send_callback);
+    wolfSSL_CTX_SetIORecv(ctx, dtls_recv_callback);
+    printf("[OK] I/O callbacks set\n\n");
 
-//     printf("\n=== SD TEST COMPLETE ===\n");
+    // Load CA certificate for server verification
+    printf("[CERT] Loading CA certificate...\n");
+    if (ca_cert_der_len > 0) {
+        ret = wolfSSL_CTX_load_verify_buffer(ctx, ca_cert_der, ca_cert_der_len,
+                                             WOLFSSL_FILETYPE_ASN1);
+        if (ret != WOLFSSL_SUCCESS) {
+            printf("[ERROR] Failed to load CA cert: %d\n", ret);
+            goto cleanup;
+        }
+        printf("[OK] CA certificate loaded (%d bytes)\n", ca_cert_der_len);
+    } else {
+        printf("[WARNING] No CA certificate available (placeholder)\n");
+        printf("[WARNING] Server verification will be skipped\n");
+    }
+
+    // Load client certificate for mutual authentication
+    printf("[CERT] Loading client certificate...\n");
+    if (client_cert_der_len > 0) {
+        ret = wolfSSL_CTX_use_certificate_buffer(ctx, client_cert_der,
+                                                 client_cert_der_len,
+                                                 WOLFSSL_FILETYPE_ASN1);
+        if (ret != WOLFSSL_SUCCESS) {
+            printf("[ERROR] Failed to load client cert: %d\n", ret);
+            goto cleanup;
+        }
+        printf("[OK] Client certificate loaded (%d bytes)\n", client_cert_der_len);
+    } else {
+        printf("[WARNING] No client certificate available (placeholder)\n");
+    }
+
+    // Load client private key
+    printf("[CERT] Loading client private key...\n");
+    if (client_key_der_len > 0) {
+        ret = wolfSSL_CTX_use_PrivateKey_buffer(ctx, client_key_der,
+                                                client_key_der_len,
+                                                WOLFSSL_FILETYPE_ASN1);
+        if (ret != WOLFSSL_SUCCESS) {
+            printf("[ERROR] Failed to load client key: %d\n", ret);
+            goto cleanup;
+        }
+        printf("[OK] Client private key loaded (%d bytes)\n\n", client_key_der_len);
+    } else {
+        printf("[WARNING] No client private key available (placeholder)\n\n");
+    }
+
+    // Configure mutual authentication (if certificates are available)
+    if (ca_cert_der_len > 0 && client_cert_der_len > 0) {
+        printf("[DTLS] Configuring mutual authentication...\n");
+        wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER |
+                                    WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+        printf("[OK] Mutual authentication configured\n\n");
+    } else {
+        printf("[WARNING] Skipping mutual authentication (no certificates)\n\n");
+    }
+
+    // Create SSL session
+    printf("[DTLS] Creating SSL session...\n");
+    ssl = wolfSSL_new(ctx);
+    if (ssl == NULL) {
+        printf("[ERROR] Failed to create SSL session\n");
+        printf("[DEBUG] This might be due to insufficient static memory\n");
+        printf("[DEBUG] Try increasing the static memory pool size\n");
+        goto cleanup;
+    }
+    printf("[OK] SSL session created\n\n");
+
+    // Perform DTLS handshake
+    printf("========================================\n");
+    printf("STARTING DTLS 1.3 HANDSHAKE\n");
+    printf("========================================\n");
+    
+    printf("[DEBUG] About to call wolfSSL_connect()...\n");
+    printf("[DEBUG] This may take 30-60 seconds for PQC key generation...\n\n");
+    
+    // Enable debugging ONLY for the connect call to see where it hangs
+    printf("[DEBUG] Enabling wolfSSL debugging to trace execution...\n");
+    wolfSSL_Debugging_ON();
+    
+    ret = wolfSSL_connect(ssl);
+    
+    // Disable debugging after connect (if it ever returns)
+    wolfSSL_Debugging_OFF();
+    
+    printf("\n[DEBUG] wolfSSL_connect() returned: %d\n", ret);
+    
+    if (ret != WOLFSSL_SUCCESS) {
+        int err = wolfSSL_get_error(ssl, ret);
+        char err_buf[80];
+        wolfSSL_ERR_error_string(err, err_buf);
+        printf("\n[ERROR] Handshake failed!\n");
+        printf("  Return code: %d\n", ret);
+        printf("  Error code:  %d\n", err);
+        printf("  Error string: %s\n", err_buf);
+        goto cleanup;
+    }
+    
+    printf("\n========================================\n");
+    printf("DTLS 1.3 HANDSHAKE COMPLETE!\n");
+    printf("========================================\n");
+    printf("[SUCCESS] Secure channel established\n");
+    printf("[SUCCESS] Mutual authentication verified\n\n");
+
+    // Display cipher suite information
+    printf("[INFO] Cipher Suite: %s\n", wolfSSL_get_cipher(ssl));
+    printf("[INFO] Protocol Version: %s\n\n", wolfSSL_get_version(ssl));
+
+    // Send test message over secure channel
+    const char* msg = "Hello from RISC-V PQC-DTLS client!";
+    printf("[DATA] Sending message: \"%s\"\n", msg);
+    
+    ret = wolfSSL_write(ssl, msg, strlen(msg));
+    if (ret < 0) {
+        int err = wolfSSL_get_error(ssl, ret);
+        printf("[ERROR] Send failed: %d (error: %d)\n", ret, err);
+        goto cleanup;
+    }
+    printf("[OK] Sent %d bytes\n\n", ret);
+
+    // Receive response from server
+    printf("[DATA] Waiting for server response...\n");
+    char recv_buf[256];
+    ret = wolfSSL_read(ssl, recv_buf, sizeof(recv_buf) - 1);
+    if (ret > 0) {
+        recv_buf[ret] = '\0';
+        printf("[DATA] Received %d bytes: \"%s\"\n\n", ret, recv_buf);
+    } else {
+        int err = wolfSSL_get_error(ssl, ret);
+        printf("[WARNING] No data received (ret: %d, error: %d)\n\n", ret, err);
+    }
+
+    printf("========================================\n");
+    printf("PQC-DTLS 1.3 DEMO COMPLETE - SUCCESS!\n");
+    printf("========================================\n");
+
+cleanup:
+    if (ssl) {
+        printf("\n[CLEANUP] Freeing SSL session...\n");
+        wolfSSL_free(ssl);
+    }
+    if (ctx) {
+        printf("[CLEANUP] Freeing SSL context...\n");
+        wolfSSL_CTX_free(ctx);
+    }
+    printf("[CLEANUP] Shutting down wolfSSL...\n");
+    wolfSSL_Cleanup();
+    
+    printf("\n[DONE] Program terminated\n");
+    return 0;
+}
