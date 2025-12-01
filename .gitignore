@@ -82,9 +82,6 @@ boot/boot.elf
 boot/boot.elf.map
 boot/*.o
 boot/*.d
-boot/crt0.*
-boot/main.*
-boot/network.*
 
 # =============================================================================
 # Server Build Output
