@@ -24,9 +24,7 @@
 #undef max
 #endif
 
-//=============================================================================
 // REQUIRED STUBS FOR BARE-METAL
-//=============================================================================
 #include <wolfssl/wolfcrypt/types.h>
 #include <sys/time.h>
 #include <time.h>
@@ -131,7 +129,9 @@ int main(void)
 
     // Initialize wolfSSL static memory pool 
     #ifdef WOLFSSL_STATIC_MEMORY
-    static unsigned char memory[1024000]; //static buffer for PQC
+    // PQC requires large buckets: 64KB (×5) + 128KB (×1) = 448KB minimum
+    // Plus certificates, keys, fragment reassembly, and runtime: need ~3MB+
+    static unsigned char memory[4194304]; // 4MB for PQC + fragments
     static WOLFSSL_HEAP_HINT* heap_hint = NULL;
     
     ret = wc_LoadStaticMemory(&heap_hint, memory, sizeof(memory), WOLFMEM_GENERAL, 10);
@@ -139,6 +139,7 @@ int main(void)
         printf("ERROR: Static memory init failed: %d\n", ret);
         return 1;
     }
+    printf("[MEM] Static memory pool: %d bytes allocated\n", (int)sizeof(memory));
     #endif
 
     // Initialize wolfSSL library
@@ -227,25 +228,52 @@ int main(void)
     // Perform DTLS handshake
     printf("STARTING DTLS 1.3 HANDSHAKE\n");
 
-    // wolfSSL_Debugging_ON();  // Uncomment for detailed handshake debugging
-    
-    ret = wolfSSL_connect(ssl);
-    
-    // wolfSSL_Debugging_OFF();
-    
-    
-    if (ret != WOLFSSL_SUCCESS) {
-        int err = wolfSSL_get_error(ssl, ret);
-        char err_buf[80];
-        wolfSSL_ERR_error_string(err, err_buf);
-        printf("\nERROR: Handshake failed!\n");
-        printf("  Return code: %d\n", ret);
-        printf("  Error code:  %d\n", err);
-        printf("  Error string: %s\n", err_buf);
-        goto cleanup;
+    wolfSSL_Debugging_ON();  // Enabled for debugging certificate processing
+
+    /*
+     * IMPORTANT:
+     *  - On this 1MHz bare-metal target, DTLS 1.3 + PQC can easily exceed
+     *    normal network timeouts while doing heavy crypto (cert verify,
+     *    Dilithium signatures, etc.).
+     *  - Our recv callback returns WOLFSSL_CBIO_ERR_WANT_READ on timeout,
+     *    which maps to wolfSSL error 323 / WOLFSSL_ERROR_WANT_READ.
+     *  - That is *not* a fatal error; it means "handshake still in progress,
+     *    call wolfSSL_connect() again once more data (or time) is available".
+     *
+     * So we loop wolfSSL_connect() until it either:
+     *  - returns WOLFSSL_SUCCESS, or
+     *  - returns a real fatal error (anything other than WANT_READ/WRITE).
+     */
+    for (;;) {
+        ret = wolfSSL_connect(ssl);
+
+        if (ret == WOLFSSL_SUCCESS) {
+            break;  // Handshake complete
+        }
+
+        {
+            int err_local = wolfSSL_get_error(ssl, ret);
+
+            if (err_local == WOLFSSL_ERROR_WANT_READ || err_local == WOLFSSL_ERROR_WANT_WRITE) {
+                // Handshake is still in progress (DTLS timers / retransmits).
+                // On bare-metal we simply retry; network_recv() already has
+                // its own timeout, so this loop will not hard-lock.
+                printf("[HANDSHAKE] wolfSSL_connect WANT_%s, retrying...\n",
+                       (err_local == WOLFSSL_ERROR_WANT_READ) ? "READ" : "WRITE");
+                continue;
+            }
+
+            // Anything else is fatal – dump diagnostics and abort.
+            char err_buf[80];
+            wolfSSL_ERR_error_string(err_local, err_buf);
+            printf("\nERROR: Handshake failed!\n");
+            printf("  Return code: %d\n", ret);
+            printf("  Error code:  %d\n", err_local);
+            printf("  Error string: %s\n", err_buf);
+            goto cleanup;
+        }
     }
     
-    printf("\n========================================\n");
     printf("DTLS 1.3 HANDSHAKE COMPLETE!\n");
 
     // Display cipher suite information

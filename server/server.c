@@ -16,6 +16,7 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <linux/if.h>
+#include <time.h>
 
 // SO_BINDTODEVICE may not be defined in all headers
 #ifndef SO_BINDTODEVICE
@@ -25,6 +26,65 @@
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
+
+// Pacing delay between sends (milliseconds)
+// The 1MHz LiteX client needs time to process each packet
+// 200ms for Certificate fragments which need reassembly
+#define SEND_PACING_MS 200
+
+// Global for peer address (set after first receive)
+static struct sockaddr_in g_peer_addr;
+static int g_peer_set = 0;
+static int g_sockfd = -1;
+
+// Custom send callback with pacing for slow client
+static int PacedSendTo(WOLFSSL* ssl, char* buf, int sz, void* ctx)
+{
+    (void)ssl;  // unused
+    (void)ctx;  // we use global sockfd instead
+    
+    int sent;
+    
+    if (g_peer_set) {
+        sent = (int)sendto(g_sockfd, buf, sz, 0, 
+                           (struct sockaddr*)&g_peer_addr, sizeof(g_peer_addr));
+    } else {
+        sent = (int)send(g_sockfd, buf, sz, 0);
+    }
+    
+    if (sent > 0) {
+        // Add delay after each send to let client process
+        printf("[PACING] Sent %d bytes, waiting %dms for client...\n", sent, SEND_PACING_MS);
+        usleep(SEND_PACING_MS * 1000);
+    } else if (sent < 0) {
+        printf("[PACING] Send error: %s\n", strerror(errno));
+    }
+    
+    return sent;
+}
+
+// Custom receive callback to capture peer address
+static int PacedRecvFrom(WOLFSSL* ssl, char* buf, int sz, void* ctx)
+{
+    (void)ssl;
+    (void)ctx;
+    
+    socklen_t peer_len = sizeof(g_peer_addr);
+    int received = (int)recvfrom(g_sockfd, buf, sz, 0,
+                                  (struct sockaddr*)&g_peer_addr, &peer_len);
+    
+    if (received > 0) {
+        if (!g_peer_set) {
+            g_peer_set = 1;
+            printf("[PACING] Peer address captured: %s:%d\n",
+                   inet_ntoa(g_peer_addr.sin_addr), ntohs(g_peer_addr.sin_port));
+        }
+    } else if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        return WOLFSSL_CBIO_ERR_WANT_READ;
+    }
+    
+    return received;
+}
 
 #ifdef NO_WOLFSSL_SERVER
 #error "NO_WOLFSSL_SERVER IS DEFINED! SERVER SUPPORT DISABLED!"
@@ -188,23 +248,51 @@ int main(void)
         return 1;
     }
     
-    // Set socket file descriptor
-    wolfSSL_set_fd(ssl, sockfd);
-    printf("[OK] SSL session created\n\n");
+    // Store socket in global for callbacks
+    g_sockfd = sockfd;
+    
+    // Use non-blocking mode for DTLS
+    wolfSSL_dtls_set_using_nonblock(ssl, 1);
+    
+    // Register custom I/O callbacks with pacing
+    // This adds delays between sends to let the slow 1MHz client process packets
+    printf("[PACING] Registering paced I/O callbacks (%dms delay between sends)...\n", SEND_PACING_MS);
+    wolfSSL_SSLSetIOSend(ssl, PacedSendTo);
+    wolfSSL_SSLSetIORecv(ssl, PacedRecvFrom);
+    
+    printf("[OK] SSL session created with pacing\n\n");
 
     printf("[WAITING] For DTLS handshake from client...\n");
     printf("  (Client should connect from 192.168.1.50)\n");
 
     struct timeval timeout;
-    timeout.tv_sec = 300;  // 300 seconds total timeout
+    timeout.tv_sec  = 1800;  // 30 minute overall socket receive timeout
     timeout.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 
+    /*
+     * IMPORTANT:
+     *  - PacedRecvFrom() returns WOLFSSL_CBIO_ERR_WANT_READ on timeout,
+     *    which becomes WOLFSSL_ERROR_WANT_READ from wolfSSL_get_error().
+     *  - On this setup the client is extremely slow (1MHz + PQC), so the
+     *    server must treat WANT_READ/WRITE as "handshake still in progress"
+     *    and keep calling wolfSSL_accept().
+     */
+    for (;;) {
+        ret = wolfSSL_accept(ssl);
+        if (ret == WOLFSSL_SUCCESS) {
+            break; // handshake complete
+        }
 
-    // Accept DTLS connection
-    ret = wolfSSL_accept(ssl);
-    if (ret != WOLFSSL_SUCCESS) {
         int err = wolfSSL_get_error(ssl, ret);
+        if (err == WOLFSSL_ERROR_WANT_READ || err == WOLFSSL_ERROR_WANT_WRITE) {
+            fprintf(stderr,
+                    "[HANDSHAKE] wolfSSL_accept WANT_%s, retrying...\n",
+                    (err == WOLFSSL_ERROR_WANT_READ) ? "READ" : "WRITE");
+            continue;
+        }
+
+        // Any other error is fatal.
         char err_buf[80];
         wolfSSL_ERR_error_string(err, err_buf);
         fprintf(stderr, "\n[ERROR] Handshake failed!\n");

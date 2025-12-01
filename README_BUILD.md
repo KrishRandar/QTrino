@@ -12,26 +12,6 @@ Ensure you have the following installed:
 
 ## Build Steps
 
-### Step 1: Generate PQC Certificates
-
-Navigate to the `certs` directory and build the certificate generator:
-
-```bash
-cd certs
-make clean
-make
-```
-
-This will:
-- Compile `gen_pqc_certs.c` with wolfSSL
-- Generate ML-DSA-44 certificates (Root CA, Server, Client)
-- Create C header files (`*.h`) for embedding in firmware
-
-**Output files:**
-- `ca_cert.h` - Root CA certificate
-- `server_cert.h`, `server_key.h` - Server credentials
-- `client_cert.h`, `client_key.h` - Client credentials
-
 ### Step 2: Build Client Firmware
 
 Navigate to the `boot` directory and compile the firmware:
