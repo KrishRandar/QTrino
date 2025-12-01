@@ -35,8 +35,6 @@
 static uint32_t rng_state = 0x12345678; // Initial seed
 
 int CustomRngGenerateBlock(byte *output, word32 sz) {
-    printf("[RNG] Generating %u bytes of entropy\n", (unsigned int)sz);
-    
     // Linear Congruential Generator (LCG)
     // Parameters from Numerical Recipes (better than trivial i*37+123)
     for (word32 i = 0; i < sz; i++) {
@@ -44,7 +42,6 @@ int CustomRngGenerateBlock(byte *output, word32 sz) {
         output[i] = (byte)(rng_state >> 24); // Use top 8 bits
     }
     
-    printf("[RNG] Generated %u bytes successfully\n", (unsigned int)sz);
     return 0;
 }
 
@@ -100,26 +97,16 @@ int dtls_recv_callback(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     int ret;
     (void)ssl;
     (void)ctx;
-
-    printf("[IO] Waiting to receive up to %d bytes create mode 100644 boot/wolfssl/src/dtls13.c (5s timeout)\n", sz);
     
     // Use the udp_recv function from network.c
-    // This function should handle the timeout internally or return 0 if no data
     ret = network_recv((uint8_t*)buf, sz, 5000); // 5 second timeout
     
     if (ret > 0) {
-        printf("[IO] Received %d bytes\n", ret);
-        // Optional: Print first few bytes to identify packet type
-        printf("[IO] First bytes: %02x %02x %02x %02x\n", 
-               (unsigned char)buf[0], (unsigned char)buf[1], 
-               (unsigned char)buf[2], (unsigned char)buf[3]);
         return ret;
     } else if (ret == 0) {
         // Timeout
-        // printf("[IO] Receive timeout\n"); // Reduce verbosity for timeout
         return WOLFSSL_CBIO_ERR_WANT_READ;
     } else {
-        printf("[IO] Receive error: %d\n", ret);
         return WOLFSSL_CBIO_ERR_GENERAL;
     }
 }
@@ -186,7 +173,6 @@ int main(void)
     printf("[DTLS] Creating DTLS 1.3 client context...\n");
     #ifdef WOLFSSL_STATIC_MEMORY
         ctx = wolfSSL_CTX_new_ex(wolfDTLSv1_3_client_method(), heap_hint);
-        printf("[DEBUG] Using static memory pool for SSL context\n");
     #else
         ctx = wolfSSL_CTX_new(wolfDTLSv1_3_client_method());
     #endif
@@ -281,20 +267,13 @@ int main(void)
     printf("========================================\n");
     printf("STARTING DTLS 1.3 HANDSHAKE\n");
     printf("========================================\n");
-    
-    printf("[DEBUG] About to call wolfSSL_connect()...\n");
-    printf("[DEBUG] This may take 30-60 seconds for PQC key generation...\n\n");
-    
-    // Enable debugging ONLY for the connect call to see where it hangs
-    printf("[DEBUG] Enabling wolfSSL debugging to trace execution...\n");
-    wolfSSL_Debugging_ON();
+
+    // wolfSSL_Debugging_ON();  // Uncomment for detailed handshake debugging
     
     ret = wolfSSL_connect(ssl);
     
-    // Disable debugging after connect (if it ever returns)
-    wolfSSL_Debugging_OFF();
+    // wolfSSL_Debugging_OFF();
     
-    printf("\n[DEBUG] wolfSSL_connect() returned: %d\n", ret);
     
     if (ret != WOLFSSL_SUCCESS) {
         int err = wolfSSL_get_error(ssl, ret);

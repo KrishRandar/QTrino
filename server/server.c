@@ -194,11 +194,9 @@ int main(void)
 
     printf("[WAITING] For DTLS handshake from client...\n");
     printf("  (Client should connect from 192.168.1.50)\n");
-    printf("  (Timeout: 180 seconds to allow for PQC key generation)\n\n");
 
-    // Set DTLS timeout to 180 seconds (PQC is slow on soft-core RISC-V)
     struct timeval timeout;
-    timeout.tv_sec = 180;  // 180 seconds total timeout
+    timeout.tv_sec = 300;  // 300 seconds total timeout
     timeout.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 
