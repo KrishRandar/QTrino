@@ -1,13 +1,11 @@
-/*
- * gen_pqc_certs.c - Generate PQC Certificate Chain
- * 
- * Generates:
- * 1. Root CA (self-signed, ML-DSA-44)
- * 2. Server certificate (signed by CA, ML-DSA-44)
- * 3. Client certificate (signed by CA, ML-DSA-44)
- * 
- * All certificates and keys are saved as DER files and converted to C headers.
- */
+
+//  Generates:
+//  1. Root CA (self-signed, ML-DSA-44)
+//  2. Server certificate (signed by CA, ML-DSA-44)
+//  3. Client certificate (signed by CA, ML-DSA-44)
+//  
+//  All certificates and keys are saved as DER files and converted to C headers.
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,12 +26,10 @@
 static int write_der_file(const char* filename, const unsigned char* data, int len) {
     FILE* f = fopen(filename, "wb");
     if (!f) {
-        printf("ERROR: Cannot open %s for writing\n", filename);
         return -1;
     }
     fwrite(data, 1, len, f);
     fclose(f);
-    printf("[OK] Wrote %s (%d bytes)\n", filename, len);
     return 0;
 }
 
@@ -41,7 +37,6 @@ static int write_der_file(const char* filename, const unsigned char* data, int l
 static int der_to_header(const char* der_file, const char* header_file, const char* var_name) {
     FILE* fin = fopen(der_file, "rb");
     if (!fin) {
-        printf("ERROR: Cannot open %s\n", der_file);
         return -1;
     }
     
@@ -58,7 +53,6 @@ static int der_to_header(const char* der_file, const char* header_file, const ch
     // Write header
     FILE* fout = fopen(header_file, "w");
     if (!fout) {
-        printf("ERROR: Cannot open %s for writing\n", header_file);
         free(data);
         return -1;
     }
@@ -78,7 +72,6 @@ static int der_to_header(const char* der_file, const char* header_file, const ch
     fclose(fout);
     free(data);
     
-    printf("[OK] Generated %s\n", header_file);
     return 0;
 }
 
@@ -99,42 +92,29 @@ int main(void) {
     int server_key_len, server_cert_len;
     int client_key_len, client_cert_len;
     
-    printf("========================================\n");
-    printf("PQC Certificate Generation (ML-DSA-44)\n");
-    printf("========================================\n\n");
-    
+    // PQC Certificate Generation (ML-DSA-44)
     // Initialize RNG
     ret = wc_InitRng(&rng);
     if (ret != 0) {
-        printf("ERROR: RNG init failed: %d\n", ret);
         return 1;
     }
-    printf("[OK] RNG initialized\n");
     
-    //=========================================================================
-    // STEP 1: Generate Root CA
-    //=========================================================================
-    printf("\n[STEP 1] Generating Root CA...\n");
-    
+//1: Generate Root CA
     // Initialize CA key
     ret = wc_dilithium_init(&ca_key);
     if (ret != 0) {
-        printf("ERROR: CA key init failed: %d\n", ret);
         return 1;
     }
     
     // Generate CA keypair (ML-DSA-44 = Level 2)
     ret = wc_dilithium_make_key(&ca_key, &rng);
     if (ret != 0) {
-        printf("ERROR: CA key generation failed: %d\n", ret);
         return 1;
     }
-    printf("[OK] CA keypair generated\n");
     
     // Export CA private key
     ca_key_len = wc_dilithium_export_key(&ca_key, ca_key_der, sizeof(ca_key_der));
     if (ca_key_len < 0) {
-        printf("ERROR: CA key export failed: %d\n", ca_key_len);
         return 1;
     }
     write_der_file("certs/ca_key.der", ca_key_der, ca_key_len);
@@ -150,33 +130,24 @@ int main(void) {
     
     ca_cert_len = wc_MakeSelfCert(&ca_cert, ca_cert_der, sizeof(ca_cert_der), &ca_key, &rng);
     if (ca_cert_len < 0) {
-        printf("ERROR: CA cert generation failed: %d\n", ca_cert_len);
         return 1;
     }
     write_der_file("certs/ca_cert.der", ca_cert_der, ca_cert_len);
-    printf("[OK] Root CA certificate created\n");
     
-    //=========================================================================
-    // STEP 2: Generate Server Certificate
-    //=========================================================================
-    printf("\n[STEP 2] Generating Server Certificate...\n");
+//2: Generate Server Certificate
     
     ret = wc_dilithium_init(&server_key);
     if (ret != 0) {
-        printf("ERROR: Server key init failed: %d\n", ret);
         return 1;
     }
     
     ret = wc_dilithium_make_key(&server_key, &rng);
     if (ret != 0) {
-        printf("ERROR: Server key generation failed: %d\n", ret);
         return 1;
     }
-    printf("[OK] Server keypair generated\n");
     
     server_key_len = wc_dilithium_export_key(&server_key, server_key_der, sizeof(server_key_der));
     if (server_key_len < 0) {
-        printf("ERROR: Server key export failed: %d\n", server_key_len);
         return 1;
     }
     write_der_file("certs/server_key.der", server_key_der, server_key_len);
@@ -193,7 +164,6 @@ int main(void) {
     server_cert_len = wc_MakeCert(&server_cert, server_cert_der, sizeof(server_cert_der), 
                                    NULL, &server_key, &rng);
     if (server_cert_len < 0) {
-        printf("ERROR: Server cert creation failed: %d\n", server_cert_len);
         return 1;
     }
     
@@ -202,33 +172,24 @@ int main(void) {
                                    server_cert_der, sizeof(server_cert_der),
                                    NULL, &ca_key, &rng);
     if (server_cert_len < 0) {
-        printf("ERROR: Server cert signing failed: %d\n", server_cert_len);
         return 1;
     }
     write_der_file("certs/server_cert.der", server_cert_der, server_cert_len);
-    printf("[OK] Server certificate created and signed\n");
     
-    //=========================================================================
-    // STEP 3: Generate Client Certificate
-    //=========================================================================
-    printf("\n[STEP 3] Generating Client Certificate...\n");
+//3: Generate Client Certificate
     
     ret = wc_dilithium_init(&client_key);
     if (ret != 0) {
-        printf("ERROR: Client key init failed: %d\n", ret);
         return 1;
     }
     
     ret = wc_dilithium_make_key(&client_key, &rng);
     if (ret != 0) {
-        printf("ERROR: Client key generation failed: %d\n", ret);
         return 1;
     }
-    printf("[OK] Client keypair generated\n");
     
     client_key_len = wc_dilithium_export_key(&client_key, client_key_der, sizeof(client_key_der));
     if (client_key_len < 0) {
-        printf("ERROR: Client key export failed: %d\n", client_key_len);
         return 1;
     }
     write_der_file("certs/client_key.der", client_key_der, client_key_len);
@@ -245,7 +206,6 @@ int main(void) {
     client_cert_len = wc_MakeCert(&client_cert, client_cert_der, sizeof(client_cert_der),
                                    NULL, &client_key, &rng);
     if (client_cert_len < 0) {
-        printf("ERROR: Client cert creation failed: %d\n", client_cert_len);
         return 1;
     }
     
@@ -254,16 +214,11 @@ int main(void) {
                                    client_cert_der, sizeof(client_cert_der),
                                    NULL, &ca_key, &rng);
     if (client_cert_len < 0) {
-        printf("ERROR: Client cert signing failed: %d\n", client_cert_len);
         return 1;
     }
     write_der_file("certs/client_cert.der", client_cert_der, client_cert_len);
-    printf("[OK] Client certificate created and signed\n");
     
-    //=========================================================================
-    // STEP 4: Convert to C Headers
-    //=========================================================================
-    printf("\n[STEP 4] Converting to C headers...\n");
+    //4: Convert to C Headers
     
     der_to_header("certs/ca_cert.der", "certs/ca_cert.h", "ca_cert_der");
     der_to_header("certs/server_cert.der", "certs/server_cert.h", "server_cert_der");
@@ -276,16 +231,6 @@ int main(void) {
     wc_dilithium_free(&server_key);
     wc_dilithium_free(&client_key);
     wc_FreeRng(&rng);
-    
-    printf("\n========================================\n");
-    printf("Certificate Generation Complete!\n");
-    printf("========================================\n");
-    printf("\nGenerated files:\n");
-    printf("  certs/ca_cert.der, certs/ca_cert.h\n");
-    printf("  certs/server_cert.der, certs/server_cert.h\n");
-    printf("  certs/server_key.der, certs/server_key.h\n");
-    printf("  certs/client_cert.der, certs/client_cert.h\n");
-    printf("  certs/client_key.der, certs/client_key.h\n");
     
     return 0;
 }

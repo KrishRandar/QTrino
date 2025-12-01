@@ -1,9 +1,6 @@
-/*
- * network.c - UDP networking for DTLS over LiteEth
- * 
- * This file provides UDP networking abstraction for DTLS communication
- * using LiteX's libliteeth library for Ethernet MAC/PHY access.
- */
+// UDP networking abstraction for DTLS communication using LiteX's libliteeth 
+// library for Ethernet MAC/PHY access.
+ 
 
 #include <stdint.h>
 #include <string.h>
@@ -13,14 +10,11 @@
 
 #include <generated/csr.h>
 
-// Only compile if Ethernet is present in SoC
 #ifdef CSR_ETHMAC_BASE
 #include <libliteeth/udp.h>
 #include <libliteeth/inet.h>
 
-//=============================================================================
 // CONFIGURATION
-//=============================================================================
 #define LOCAL_IP    IPTOINT(192, 168, 1, 50)    // RISC-V client IP
 #define LOCAL_PORT  12345                        // Our UDP port
 #define SERVER_IP   IPTOINT(192, 168, 1, 100)   // DTLS server IP  
@@ -34,12 +28,9 @@ static uint8_t rx_buffer[2048];
 static int rx_len = 0;
 static int rx_ready = 0;
 
-//=============================================================================
 // UDP CALLBACK - Called by libliteeth when packet arrives
-//=============================================================================
 static void udp_rx_callback(uint32_t src_ip, uint16_t src_port,
                             uint16_t dst_port, void *data, uint32_t length) {
-    // Check if this is for our DTLS port
     if (dst_port != LOCAL_PORT) {
         return;  // Ignore packets for other ports
     }
@@ -52,33 +43,25 @@ static void udp_rx_callback(uint32_t src_ip, uint16_t src_port,
     }
 }
 
-//=============================================================================
 // INITIALIZATION
-//=============================================================================
 void network_init(void) {
     // Set our MAC and IP addresses
     udp_set_mac(my_mac);
     udp_set_ip(LOCAL_IP);
     
     // Start UDP stack (initializes Ethernet MAC)
-    // NOTE: udp_start() clears the callback, so we must set it AFTER
+    // udp_start() clears the callback, so we must set it AFTER
     udp_start(my_mac, LOCAL_IP);
     
-    // Register callback for incoming packets (AFTER udp_start!)
+    // Register callback for incoming packets
     udp_set_callback(udp_rx_callback);
     
-    printf("[NET] Network initialized\n");
-    printf("[NET] Local IP: 192.168.1.50:%d\n", LOCAL_PORT);
-    printf("[NET] Server: 192.168.1.100:%d\n", SERVER_PORT);
 }
 
-//=============================================================================
 // SEND UDP PACKET
-//=============================================================================
 int network_send(const uint8_t* data, int len) {
     // Resolve server IP to MAC address (ARP)
     if (!udp_arp_resolve(SERVER_IP)) {
-        printf("[NET] ARP resolution failed\n");
         return -1;
     }
     
@@ -91,23 +74,18 @@ int network_send(const uint8_t* data, int len) {
     // Send the packet
     int ret = udp_send(LOCAL_PORT, SERVER_PORT, len);
     if (ret <= 0) {
-        printf("[NET] UDP send failed\n");
         return -1;
     }
     
     return len;
 }
 
-//=============================================================================
 // RECEIVE UDP PACKET
-//=============================================================================
 int network_recv(uint8_t* buffer, int max_len, int timeout_ms) {
-    // Simple timeout implementation using busy loop
-    // In production, use timer interrupt
-    volatile int timeout_counter = timeout_ms * 1000;  // Approximate
+    volatile int timeout_counter = timeout_ms * 1000; 
     
     while (timeout_counter > 0) {
-        // Service the UDP stack (processes incoming packets)
+        // processes incoming packets
         udp_service();
         
         // Check if we have data
@@ -128,7 +106,7 @@ int network_recv(uint8_t* buffer, int max_len, int timeout_ms) {
 #else
 // Stub implementations if Ethernet is not present
 void network_init(void) {
-    printf("[ERROR] Ethernet not configured in SoC\n");
+    printf("ERROR: Ethernet not configured in SoC\n");
 }
 
 int network_send(const uint8_t* data, int len) {
