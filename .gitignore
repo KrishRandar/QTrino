@@ -1,242 +1,44 @@
-# =============================================================================
-# Python & Virtual Environments
-# =============================================================================
-litex-env/
-venv/
-env/
-ENV/
-.venv/
-*.pyc
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-*.egg-info/
-dist/
-build/
-*.egg
-*.whl
-
-# =============================================================================
-# LiteX Dependencies (Git Submodules / Installed Packages)
-# =============================================================================
-litedram/
-liteeth/
-litei2c/
-liteiclink/
-litejesd204b/
-litepcie/
-litesata/
-litescope/
-litesdcard/
-litespi/
-migen/
-valentyusb/
-pythondata-cpu-*/
-pythondata-misc-*/
-pythondata-software-*/
-prog/
-
-# =============================================================================
-# Build Artifacts
-# =============================================================================
-# Object files
-*.o
-*.lo
-*.obj
-
-# Compiled binaries
-*.bin
-*.elf
-*.exe
-*.out
-*.app
-
-# Build directories
-build/
-boot/build/
-server/build/
-**/build/
-
-# Dependency files
-*.d
-*.deps
-
-# Map files
-*.map
-*.elf.map
-
-# Archive files
-*.a
-*.lib
-*.so
-*.dylib
-*.dll
-
-# =============================================================================
-# Firmware Build Output
-# =============================================================================
+litex-env
+litedram
+liteeth
+litei2c
+liteiclink
+litejesd204b
+litepcie
+litesata
+litescope
+litesdcard
+litespi
+migen
+prog
+pythondata-cpu-lm32
+pythondata-cpu-minerva
+pythondata-cpu-mor1kx
+pythondata-cpu-naxriscv
+pythondata-cpu-sentinel
+pythondata-cpu-serv
+pythondata-cpu-vexiiriscv
+pythondata-cpu-vexriscv
+pythondata-cpu-vexriscv-smp
+pythondata-misc-tapcfg
+pythondata-misc-usb_ohci
+pythondata-software-compiler_rt
+pythondata-software-picolibc
+valentyusb
 boot/boot.bin
 boot/boot.elf
 boot/boot.elf.map
-boot/*.o
-boot/*.d
-
-# =============================================================================
-# Server Build Output
-# =============================================================================
+boot/crt0.d
+boot/crt0.o
+boot/main.d
+boot/main.o
+build
 server/*.o
 server/*.d
-server/server
-server/server.exe
-server/*.bin
-server/*.elf
-
-# =============================================================================
-# wolfSSL/wolfCrypt Build Artifacts
-# =============================================================================
-boot/wolfssl/**/*.o
-boot/wolfssl/**/*.d
-boot/wolfcrypt/**/*.o
-boot/wolfcrypt/**/*.d
-server/wolfssl/**/*.o
-server/wolfssl/**/*.d
-server/wolfcrypt/**/*.o
-server/wolfcrypt/**/*.d
-
-# =============================================================================
-# Certificates & Keys (keep .h headers, ignore binary formats)
-# =============================================================================
-*.der
-*.key
-*.pem
-*.crt
-*.cer
-*.p12
-*.pfx
-*.jks
-certs/*.der
-certs/*.key
-certs/*.pem
-!certs/*.h
-!certs/*.sh
-!certs/*.py
-!certs/*.c
-!certs/Makefile
-
-# =============================================================================
-# IDE & Editor Files
-# =============================================================================
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-*.sublime-project
-*.sublime-workspace
-.project
-.classpath
-.settings/
-*.code-workspace
-
-# =============================================================================
-# OS Files
-# =============================================================================
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-desktop.ini
-
-# =============================================================================
-# Logs & Temporary Files
-# =============================================================================
-*.log
-*.tmp
-*.bak
-*.backup
-*.old
-*.orig
-*.rej
-*.patch
-*.diff
-*.pid
-*.seed
-*.pid.lock
-
-# =============================================================================
-# Network Captures & Debug Files
-# =============================================================================
-*.pcap
-*.pcapng
-*.cap
-wireshark-*
-
-# =============================================================================
-# Simulation & Test Output
-# =============================================================================
-sim_build/
-*.vcd
-*.fst
-*.lxt
-*.vpd
-*.fsdb
-*.dump
-*.trace
-
-# =============================================================================
-# LiteX Specific
-# =============================================================================
-csr.json
-*.json.bak
-gateware/
-software/
-*.fbi
-*.bit
-*.mcs
-*.prg
-
-# =============================================================================
-# Documentation Build
-# =============================================================================
-docs/_build/
-docs/.doctrees/
-*.pdf
-!docs/*.pdf
-
-# =============================================================================
-# Coverage & Testing
-# =============================================================================
-.coverage
-htmlcov/
-.tox/
-.pytest_cache/
-.hypothesis/
-*.cover
-coverage.xml
-*.gcda
-*.gcno
-*.gcov
-
-# =============================================================================
-# Miscellaneous
-# =============================================================================
-*.zip
-*.tar
-*.tar.gz
-*.tgz
-*.rar
-*.7z
-*.deb
-*.rpm
-*.dmg
-*.iso
-*.img
-
+boot/wolfssl/src/*.o
+boot/wolfssl/src/*.d
+boot/wolfcrypt/src/*.o
+boot/wolfcrypt/src/*.d
 # Project-specific temporary files
 changes.txt
 changes1.txt
@@ -249,5 +51,5 @@ prompt.txt
 changes_network.txt
 cleanup_final.txt
 cleanup_summary.txt
-README_BUILD.md
 README_HANDSHAKE.md
+output1.txt

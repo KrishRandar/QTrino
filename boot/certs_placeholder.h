@@ -4,5 +4,7 @@
 // Organization: QTrino Labs
 
 #include "../certs/ca_cert.h"
+#include "../certs/server_cert.h"
+#include "../certs/server_key.h"
 #include "../certs/client_cert.h"
 #include "../certs/client_key.h"

@@ -40,7 +40,7 @@ unsigned int LowResTimer(void);
 #define NO_ERROR_STRINGS            // Save space by removing error strings
 #define WOLFSSL_SMALL_SESSION_CACHE // Smaller session cache
 #define WOLFSSL_STATIC_MEMORY       // Use static memory pools (crucial for 1MHz CPU!)
-#define WOLFSSL_STATIC_MEMORY_SMALL_BUCKETS_ONLY  // Further optimize for embedded
+// Note: SMALL_BUCKETS_ONLY removed - PQC needs large buckets (64KB+)
 #define NO_SIGNAL                   // Disable signal handling (sigaction)
 #define NO_SIG_PIPE                 // Disable SIGPIPE
 #define NO_SIGALRM                  // Disable SIGALRM
