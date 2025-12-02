@@ -23,10 +23,16 @@
 // MAC address (must match SoC configuration)
 static uint8_t my_mac[6] = {0x10, 0xe2, 0xd5, 0x00, 0x00, 0x00};
 
-// Receive buffer for incoming packets
-static uint8_t rx_buffer[2048];
-static int rx_len = 0;
-static int rx_ready = 0;
+// Receive buffer queue (Ring Buffer)
+// We need to buffer multiple packets because PQC certificates arrive in bursts
+// of fragments, and a single buffer would cause drops while processing.
+#define RX_QUEUE_SIZE 16
+#define RX_BUF_SIZE   2048
+
+static uint8_t rx_queue[RX_QUEUE_SIZE][RX_BUF_SIZE];
+static int rx_lens[RX_QUEUE_SIZE];
+static volatile int rx_head = 0; // Write index
+static volatile int rx_tail = 0; // Read index
 
 // UDP CALLBACK - Called by libliteeth when packet arrives
 static void udp_rx_callback(uint32_t src_ip, uint16_t src_port,
@@ -35,11 +41,19 @@ static void udp_rx_callback(uint32_t src_ip, uint16_t src_port,
         return;  // Ignore packets for other ports
     }
     
-    // Copy to receive buffer (if not already full)
-    if (!rx_ready && length <= sizeof(rx_buffer)) {
-        memcpy(rx_buffer, data, length);
-        rx_len = length;
-        rx_ready = 1;
+    // Calculate next write index
+    int next_head = (rx_head + 1) % RX_QUEUE_SIZE;
+    
+    // Check if queue is full (next head would equal tail)
+    if (next_head != rx_tail) {
+        if (length <= RX_BUF_SIZE) {
+            memcpy(rx_queue[rx_head], data, length);
+            rx_lens[rx_head] = length;
+            rx_head = next_head;
+        }
+    } else {
+        // Queue full - packet dropped!
+        // printf("!"); // Minimal debug marker for drop
     }
 }
 
@@ -48,6 +62,10 @@ void network_init(void) {
     // Set our MAC and IP addresses
     udp_set_mac(my_mac);
     udp_set_ip(LOCAL_IP);
+    
+    // Reset queue
+    rx_head = 0;
+    rx_tail = 0;
     
     // Start UDP stack (initializes Ethernet MAC)
     // udp_start() clears the callback, so we must set it AFTER
@@ -82,18 +100,25 @@ int network_send(const uint8_t* data, int len) {
 
 // RECEIVE UDP PACKET
 int network_recv(uint8_t* buffer, int max_len, int timeout_ms) {
-    volatile int timeout_counter = timeout_ms * 1000; 
+    // Simple busy-wait timeout calibration for ~1MHz CPU
+    // This is approximate but sufficient for bare-metal
+    volatile int timeout_counter = timeout_ms * 2000; 
     
     while (timeout_counter > 0) {
-        // processes incoming packets
+        // processes incoming packets (calls udp_rx_callback)
         udp_service();
         
-        // Check if we have data
-        if (rx_ready) {
-            int copy_len = (rx_len < max_len) ? rx_len : max_len;
-            memcpy(buffer, rx_buffer, copy_len);
-            rx_ready = 0;
-            rx_len = 0;
+        // Check if we have data in the queue
+        if (rx_head != rx_tail) {
+            // Pop packet from tail
+            int pkt_len = rx_lens[rx_tail];
+            int copy_len = (pkt_len < max_len) ? pkt_len : max_len;
+            
+            memcpy(buffer, rx_queue[rx_tail], copy_len);
+            
+            // Advance tail
+            rx_tail = (rx_tail + 1) % RX_QUEUE_SIZE;
+            
             return copy_len;
         }
         
