@@ -95,8 +95,8 @@ int dtls_recv_callback(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     (void)ctx;
     
     // Use the udp_recv function from network.c
-    printf("  [NETWORK] <<< Waiting to receive (timeout: 20s)...\n");
-    ret = network_recv((uint8_t*)buf, sz, 20000); // 20 second timeout
+    printf("  [NETWORK] <<< Waiting to receive (timeout: 60s)...\n");
+    ret = network_recv((uint8_t*)buf, sz, 60000); // 60 second timeout for CPU-independent operation
     
     if (ret > 0) {
         printf("  [OK] Received %d bytes\n", ret);

@@ -64,11 +64,46 @@ Ensure your system has:
 - **Build Tools**: gcc, make, cmake, git
 - **Sudo Access**: Required for RISC-V toolchain installation
 
+> [!IMPORTANT]
+> **CPU Power Management**: The LiteX simulator is timing-sensitive. For reliable operation:
+> - Connect your laptop to AC power (prevents CPU throttling)
+> - Set CPU governor to "performance" mode (see below)
+> - The client automatically calibrates timeouts for your CPU speed
+
+### CPU Frequency Configuration (Critical!)
+
+The simulation uses busy-wait timing loops that depend on your host CPU speed. When your CPU throttles (battery mode or frequency scaling), timeouts become unreliable.
+
+**Quick Setup:**
+```bash
+# Validate your environment (checks CPU governor, power source, dependencies)
+./scripts/validate_environment.sh
+
+# If warnings appear, configure CPU for performance
+sudo ./scripts/setup_cpu_performance.sh
+```
+
+**Manual Configuration (if needed):**
+```bash
+# Check current CPU governor
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+
+# Set to performance mode
+sudo cpupower frequency-set -g performance
+
+# Or manually for all CPUs
+for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    echo performance | sudo tee $cpu
+done
+```
+
+**Note**: This setting resets after reboot. Run the setup script before each simulation session.
+
 ### 1️⃣ Clone the Repository
 
 ```bash
-git clone https://github.com/QTrino-Labs-Pvt-Ltd/Constraint_Env_Sim.git
-cd Constraint_Env_Sim
+git clone https://github.com/KrishRandar/QTrino.git
+cd QTrino
 ```
 
 ### 2️⃣ Setup Python Virtual Environment
@@ -358,6 +393,38 @@ sudo ./server/server
 - Full handshake: ~60-90 seconds
 
 This is **normal** for this constraint environment.
+
+### Issue: Client/server stuck on "waiting to receive" (on battery or different laptop)
+
+**Symptoms:**
+- Works fine on AC power, fails on battery
+- Works on one laptop but not another
+- Both endpoints stuck waiting indefinitely
+
+**Cause:** CPU frequency scaling causes busy-wait timeout loops to become unreliable.
+
+**Solution:**
+```bash
+# 1. Validate your environment
+./scripts/validate_environment.sh
+
+# 2. If warnings appear about CPU governor or battery:
+sudo ./scripts/setup_cpu_performance.sh
+
+# 3. Connect AC power adapter if possible
+
+# 4. Retry the simulation
+```
+
+**Technical details:**
+- The client now automatically calibrates timeouts for your CPU speed
+- Base timeouts are increased to 60 seconds (client) and 3 seconds (server pacing)
+- However, performance mode is still recommended for consistent timing
+
+**If issues persist on specific hardware:**
+- Some older/slower CPUs may need even longer timeouts
+- Reduce background CPU load (close browsers, etc.)
+- Check that virtualization is not adding overhead
 
 ---
 

@@ -29,8 +29,8 @@
 
 // Pacing delay between sends (milliseconds)
 // The 1MHz LiteX client needs time to process each packet
-// 2000ms gives the client time to poll MAC before next packet arrives
-#define SEND_PACING_MS 2000
+// 3000ms (3s) provides robust timing across different host CPU speeds
+#define SEND_PACING_MS 3000
 
 // Global for peer address (set after first receive)
 static struct sockaddr_in g_peer_addr;

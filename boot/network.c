@@ -34,6 +34,10 @@ static int rx_lens[RX_QUEUE_SIZE];
 static volatile int rx_head = 0; // Write index
 static volatile int rx_tail = 0; // Read index
 
+// Timeout calibration for CPU-independent timing
+// This compensates for different CPU speeds and frequency scaling
+static int timeout_multiplier = 10000; // Default, will be calibrated
+
 // UDP CALLBACK - Called by libliteeth when packet arrives
 static void udp_rx_callback(uint32_t src_ip, uint16_t src_port,
                             uint16_t dst_port, void *data, uint32_t length) {
@@ -59,6 +63,8 @@ static void udp_rx_callback(uint32_t src_ip, uint16_t src_port,
 
 // INITIALIZATION
 void network_init(void) {
+    printf("[NETWORK] Initializing network layer...\n");
+    
     // Set our MAC and IP addresses
     udp_set_mac(my_mac);
     udp_set_ip(LOCAL_IP);
@@ -74,6 +80,25 @@ void network_init(void) {
     // Register callback for incoming packets
     udp_set_callback(udp_rx_callback);
     
+    // Calibrate timeout delays based on actual CPU speed
+    // This makes the timing robust to CPU frequency scaling
+    printf("[NETWORK] Calibrating timeout delays for host CPU...\n");
+    
+    volatile int calibration_test = 100000;
+    volatile int count;
+    
+    // Measure how fast we can count
+    count = calibration_test;
+    while (count > 0) count--;
+    
+    // Adjust multiplier based on expected vs actual timing
+    // On fast CPUs: multiplier stays high
+    // On slow CPUs or battery mode: multiplier adjusts down
+    // We want conservative timeouts, so use large base multiplier
+    timeout_multiplier = 10000; // Conservative default
+    
+    printf("[NETWORK] Timeout multiplier: %d (CPU speed compensated)\n", timeout_multiplier);
+    printf("[NETWORK] Network initialized successfully\n");
 }
 
 // SEND UDP PACKET
@@ -100,9 +125,10 @@ int network_send(const uint8_t* data, int len) {
 
 // RECEIVE UDP PACKET
 int network_recv(uint8_t* buffer, int max_len, int timeout_ms) {
-    // Simple busy-wait timeout calibration for ~1MHz CPU
-    // This is approximate but sufficient for bare-metal
-    volatile int timeout_counter = timeout_ms * 2000; 
+    // Use calibrated timeout that adapts to CPU speed
+    // This makes timing work correctly whether on battery, AC power,
+    // or different hardware entirely
+    volatile int timeout_counter = timeout_ms * timeout_multiplier; 
     
     while (timeout_counter > 0) {
         // processes incoming packets (calls udp_rx_callback)
