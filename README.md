@@ -204,7 +204,7 @@ These certificates use **ML-DSA-44 (Dilithium)** for signatures and are embedded
 Compile the RISC-V bare-metal DTLS client:
 
 ```bash
-cd ../boot
+cd boot
 make clean
 make
 ```
