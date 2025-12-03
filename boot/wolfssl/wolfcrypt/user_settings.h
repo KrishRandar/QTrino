@@ -38,7 +38,7 @@ unsigned int LowResTimer(void);
 #define SINGLE_THREADED             // No threading support needed
 #define SINGLE_THREADED             // No threading support needed
 #define NO_ERROR_STRINGS            // Save space by removing error strings
-#define WOLFSSL_SMALL_SESSION_CACHE // Smaller session cache
+// #define WOLFSSL_SMALL_SESSION_CACHE // Smaller session cache - DISABLED for session tickets
 #define WOLFSSL_STATIC_MEMORY       // Use static memory pools (crucial for 1MHz CPU!)
 // Note: SMALL_BUCKETS_ONLY removed - PQC needs large buckets (64KB+)
 #define NO_SIGNAL                   // Disable signal handling (sigaction)
@@ -59,6 +59,13 @@ unsigned int LowResTimer(void);
 #define WOLFSSL_DTLS_ALLOW_FUTURE    // Allow future DTLS messages
 #define WOLFSSL_DTLS13_NO_HRR_ON_RESUME  // Disable HRR on resume
 #define WOLFSSL_STATIC_PSK           // Bypass "No cipher suites" check
+
+// ============= SESSION RESUMPTION SUPPORT =============
+#define HAVE_SESSION_TICKET          // Enable session tickets for resumption
+#define WOLFSSL_SESSION_EXPORT       // Allow exporting session data
+// Explicitly enable session cache for client (required for session tickets)
+#undef NO_SESSION_CACHE              // Ensure session cache is NOT disabled
+#undef NO_CLIENT_CACHE               // Ensure client cache is available
 
 // ============= DISABLE CLASSICAL ALGORITHMS (PURE PQC) =============
 #define NO_RSA                       // Disable RSA

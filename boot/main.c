@@ -95,8 +95,8 @@ int dtls_recv_callback(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     (void)ctx;
     
     // Use the udp_recv function from network.c
-    printf("  [NETWORK] <<< Waiting to receive (timeout: 60s)...\n");
-    ret = network_recv((uint8_t*)buf, sz, 60000); // 60 second timeout for CPU-independent operation
+    printf("  [NETWORK] <<< Waiting to receive (timeout: 2s)...\n");
+    ret = network_recv((uint8_t*)buf, sz, 2000); // 2 second timeout - optimized
     
     if (ret > 0) {
         printf("  [OK] Received %d bytes\n", ret);
@@ -356,7 +356,8 @@ int main(void)
     printf("===============================================================================\n");
     printf("\n");
 
-    // Display cipher suite information
+    // Enable debug logging to see received data
+    wolfSSL_Debugging_ON();
 
     // Send test message over secure channel
     const char* msg = "Hello from RISC-V PQC-DTLS client!";

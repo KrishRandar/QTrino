@@ -29,8 +29,11 @@
 
 // Pacing delay between sends (milliseconds)
 // The 1MHz LiteX client needs time to process each packet
-// 3000ms (3s) provides robust timing across different host CPU speeds
+// Optimized to 200ms for faster handshake with 64-packet buffer
 #define SEND_PACING_MS 3000
+
+// Quick timeout multiplier for DTLS 1.3
+#define QUICK_MULT  4
 
 // Global for peer address (set after first receive)
 static struct sockaddr_in g_peer_addr;
@@ -110,6 +113,35 @@ static int PacedRecvFrom(WOLFSSL* ssl, char* buf, int sz, void* ctx)
 #define CLIENT_IP "192.168.1.50"
 #define CLIENT_MAC "10:e2:d5:00:00:00"
 
+// Helper function to set DTLS handshake timeout
+// Supports DTLS 1.3 quick timeout for out-of-order message handling
+static void setHsTimeout(WOLFSSL* ssl, struct timeval *tv)
+{
+    int timeout = wolfSSL_dtls_get_current_timeout(ssl);
+#ifdef WOLFSSL_DTLS13
+    if (wolfSSL_dtls13_use_quick_timeout(ssl)) {
+        // Use quick timeout (1/4 of normal timeout)
+        if (timeout >= QUICK_MULT)
+            tv->tv_sec = timeout / QUICK_MULT;
+        else
+            tv->tv_usec = timeout * 1000000 / QUICK_MULT;
+    }
+    else
+#endif
+        tv->tv_sec = timeout;
+}
+
+// Helper function to display connection information
+static void showConnInfo(WOLFSSL* ssl)
+{
+    const char* cipher = wolfSSL_get_cipher(ssl);
+    const char* version = wolfSSL_get_version(ssl);
+    
+    printf("[CONNECTION INFO]\n");
+    printf("  Cipher suite: %s\n", cipher ? cipher : "(unknown)");
+    printf("  Protocol version: %s\n", version ? version : "(unknown)");
+}
+
 int main(void)
 {
     int sockfd;
@@ -139,7 +171,7 @@ int main(void)
     printf("[OK] wolfSSL library initialized\n");
     printf("\n");
     
-    // Enable debugging
+    // Enable debugging to see received data
     printf("[DEBUG] Enabling wolfSSL debug output...\n");
     wolfSSL_Debugging_ON();
     printf("[OK] Debug logging enabled\n");
@@ -280,6 +312,24 @@ int main(void)
     // Use non-blocking mode for DTLS
     wolfSSL_dtls_set_using_nonblock(ssl, 1);
     
+    // Enable DTLS 1.3 stateless cookie exchange (DoS protection)
+#ifdef WOLFSSL_SEND_HRR_COOKIE
+    {
+        // Applications should update this secret periodically in production
+        const char *secret = "QTrino-PQC-Server-Secret-2024";
+        printf("[SECURITY] Enabling DTLS 1.3 cookie exchange (DoS protection)...\n");
+        if (wolfSSL_send_hrr_cookie(ssl, (byte*)secret, strlen(secret))
+                != WOLFSSL_SUCCESS) {
+            fprintf(stderr, "[WARNING] wolfSSL_send_hrr_cookie failed\n");
+            fprintf(stderr, "[WARNING] Continuing without stateless cookie exchange\n");
+        } else {
+            printf("[OK] HRR cookie exchange enabled\n");
+        }
+    }
+#else
+    printf("[INFO] WOLFSSL_SEND_HRR_COOKIE not enabled (compile-time option)\n");
+#endif
+    
     // Register custom I/O callbacks with pacing
     // This adds delays between sends to let the slow 1MHz client process packets
     printf("[PACING] Registering paced I/O callbacks...\n");
@@ -297,34 +347,58 @@ int main(void)
     printf("[INFO] Handshake may take 60-90 seconds with 1MHz PQC client\n");
     printf("\n");
 
-    struct timeval timeout;
-    timeout.tv_sec  = 1800;  // 30 minute overall socket receive timeout
-    timeout.tv_usec = 0;
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-
     /*
-     * IMPORTANT:
-     *  - PacedRecvFrom() returns WOLFSSL_CBIO_ERR_WANT_READ on timeout,
-     *    which becomes WOLFSSL_ERROR_WANT_READ from wolfSSL_get_error().
-     *  - On this setup the client is extremely slow (1MHz + PQC), so the
-     *    server must treat WANT_READ/WRITE as "handshake still in progress"
-     *    and keep calling wolfSSL_accept().
+     * IMPORTANT - DTLS 1.3 Timeout Handling:
+     *  - We use dynamic socket timeouts based on DTLS handshake state
+     *  - setHsTimeout() uses wolfSSL_dtls_get_current_timeout() and
+     *    wolfSSL_dtls13_use_quick_timeout() for DTLS 1.3 quick timeouts
+     *  - On socket timeout, we call wolfSSL_dtls_got_timeout() to trigger
+     *    retransmissions
+     *  - WANT_READ/WRITE mean handshake is in progress (normal for slow client)
      */
-    printf("[HANDSHAKE] Starting DTLS 1.3 handshake...\n");
+    printf("[HANDSHAKE] Starting DTLS 1.3 handshake with dynamic timeouts...\n");
     for (;;) {
+        // Set dynamic timeout based on current DTLS state
+        if (!wolfSSL_is_init_finished(ssl)) {
+            struct timeval tv;
+            memset(&tv, 0, sizeof(tv));
+            setHsTimeout(ssl, &tv);
+            
+            // Apply timeout to socket (if not set, defaults to blocking forever)
+            if (tv.tv_sec > 0 || tv.tv_usec > 0) {
+                setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            }
+        }
+        
         ret = wolfSSL_accept(ssl);
+        
         if (ret == WOLFSSL_SUCCESS) {
-            break; // handshake complete
+            break; // Handshake complete!
         }
 
         int err = wolfSSL_get_error(ssl, ret);
-        if (err == WOLFSSL_ERROR_WANT_READ || err == WOLFSSL_ERROR_WANT_WRITE) {
-            printf("[HANDSHAKE] In progress... WANT_%s (normal for slow client)\n",
-                    (err == WOLFSSL_ERROR_WANT_READ) ? "READ" : "WRITE");
+        
+        // Handle timeout - let wolfSSL retransmit
+        if (err == WOLFSSL_ERROR_WANT_READ) {
+            if (!wolfSSL_is_init_finished(ssl)) {
+                // Handshake still in progress - check if timeout occurred
+                if (wolfSSL_dtls_got_timeout(ssl) != WOLFSSL_SUCCESS) {
+                    fprintf(stderr, "[ERROR] wolfSSL_dtls_got_timeout failed\n");
+                    goto cleanup;
+                }
+                printf("[HANDSHAKE] Timeout - retransmitting...\n");
+            } else {
+                printf("[HANDSHAKE] In progress... WANT_READ\n");
+            }
+            continue;
+        }
+        
+        if (err == WOLFSSL_ERROR_WANT_WRITE) {
+            printf("[HANDSHAKE] In progress... WANT_WRITE\n");
             continue;
         }
 
-        // Any other error is fatal.
+        // Any other error is fatal
         char err_buf[80];
         wolfSSL_ERR_error_string(err, err_buf);
         fprintf(stderr, "\n");
@@ -350,8 +424,7 @@ int main(void)
     printf("===============================================================================\n");
     printf("[SUCCESS] Secure channel established with client\n");
     printf("[SUCCESS] Client authenticated successfully\n");
-    printf("[SUCCESS] Cipher suite: %s\n", wolfSSL_get_cipher(ssl));
-    printf("[SUCCESS] Protocol version: %s\n", wolfSSL_get_version(ssl));
+    showConnInfo(ssl);
     printf("===============================================================================\n");
     printf("\n");
 

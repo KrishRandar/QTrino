@@ -49,12 +49,15 @@
 #define WOLFSSL_SYS_CA_CERTS
 #define WOLFSSL_CERT_GEN
 #define WOLFSSL_ASN_TEMPLATE
-#define WOLFSSL_CERT_GEN
-#define WOLFSSL_ASN_TEMPLATE
 #define HAVE_PKCS7
+#define WOLFSSL_DTLS13_NO_HRR_ON_RESUME  // Disable HRR on resume
 #define WOLFSSL_STATIC_PSK           // Bypass "No cipher suites" check and enable PSK logic
 #define HAVE_HKDF                    // Required for TLS 1.3
 #define HAVE_SYS_TIME_H              // Use system time functions (gettimeofday)
+
+// Session Resumption Support
+#define HAVE_SESSION_TICKET          // Enable session tickets for resumption
+#define WOLFSSL_SESSION_EXPORT       // Allow exporting session data
 
 // Debugging
 #define DEBUG_WOLFSSL
