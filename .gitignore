@@ -39,6 +39,9 @@ boot/wolfssl/src/*.o
 boot/wolfssl/src/*.d
 boot/wolfcrypt/src/*.o
 boot/wolfcrypt/src/*.d
+wolfcrypt/src/*.o 
+wolfcrypt/src/*.d
+
 # Project-specific temporary files
 changes.txt
 changes1.txt

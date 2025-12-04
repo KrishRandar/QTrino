@@ -46,14 +46,16 @@
 #define NO_OLD_TLS
 
 // Standard System Features (Enable these for Host Server)
-#define WOLFSSL_SYS_CA_CERTS
-#define WOLFSSL_CERT_GEN
-#define WOLFSSL_ASN_TEMPLATE
-#define HAVE_PKCS7
+#define WOLFSSL_ASN_TEMPLATE         // ASN.1 template parsing (needed for RPK)
 #define WOLFSSL_DTLS13_NO_HRR_ON_RESUME  // Disable HRR on resume
 #define WOLFSSL_STATIC_PSK           // Bypass "No cipher suites" check and enable PSK logic
 #define HAVE_HKDF                    // Required for TLS 1.3
 #define HAVE_SYS_TIME_H              // Use system time functions (gettimeofday)
+
+// Raw Public Key (RPK) Support - RFC 7250
+// Replaces X.509 certificates with lightweight SubjectPublicKeyInfo
+#define HAVE_RPK                     // Enable Raw Public Key authentication
+#define WOLFSSL_ALWAYS_VERIFY_CB     // Always call verify callback (needed for RPK verification)
 
 // Session Resumption Support
 #define HAVE_SESSION_TICKET          // Enable session tickets for resumption

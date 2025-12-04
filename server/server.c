@@ -1,8 +1,10 @@
 /*
- * server.c - PQC-DTLS 1.3 Server
+ * server.c - PQC-DTLS 1.3 Server with Raw Public Key (RPK) Authentication
  * 
  * wolfSSL-based DTLS 1.3 server for testing mutual authentication
  * with RISC-V bare-metal client using ML-KEM-512 and ML-DSA-44.
+ * 
+ * Authentication: Raw Public Keys (RFC 7250) - no X.509 certificates
  */
 
 #include <stdio.h>
@@ -10,6 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -27,10 +30,14 @@
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 
+// Include embedded RPK keys (server private key + client public key for verification)
+#include "server_rpk.h"
+
 // Pacing delay between sends (milliseconds)
-// The 1MHz LiteX client needs time to process each packet
-// Optimized to 200ms for faster handshake with 64-packet buffer
-#define SEND_PACING_MS 3000
+// The 1MHz LiteX client takes ~3 seconds to process each packet
+// CRITICAL: 500ms was too fast - client drops packets while processing!
+// Increased to 3000ms to match client's actual processing speed
+#define SEND_PACING_MS 2500
 
 // Quick timeout multiplier for DTLS 1.3
 #define QUICK_MULT  4
@@ -104,9 +111,6 @@ static int PacedRecvFrom(WOLFSSL* ssl, char* buf, int sz, void* ctx)
 #error "WOLFSSL_DTLS13 IS NOT DEFINED!"
 #endif
 
-// Include embedded certificates (placeholder for now)
-#include "../boot/certs_placeholder.h"
-
 #define SERVER_PORT 11111
 #define BUFFER_SIZE 2048
 #define TAP_INTERFACE "tap0"
@@ -142,6 +146,61 @@ static void showConnInfo(WOLFSSL* ssl)
     printf("  Protocol version: %s\n", version ? version : "(unknown)");
 }
 
+// =============================================================================
+// RPK Verification Callback for Client Authentication
+// =============================================================================
+// This callback is called by wolfSSL to verify the client's Raw Public Key.
+// Since we use pre-shared public keys, we compare the received RPK with
+// our stored copy of the client's public key.
+//
+// Per wolfSSL RPK documentation: access strctx->certs->buffer for the RPK data
+// =============================================================================
+static int rpk_verify_callback(int preverify, WOLFSSL_X509_STORE_CTX* store) {
+    (void)preverify;  // Not used for RPK
+    
+    printf("[RPK] Verifying client's Raw Public Key...\n");
+    
+    if (store == NULL) {
+        printf("[RPK ERROR] Verification context is NULL\n");
+        return 0;  // Verification failed
+    }
+    
+    // For RPK, the peer's public key is stored in store->certs buffer
+    // This is the SubjectPublicKeyInfo DER-encoded data
+    if (store->certs == NULL || store->totalCerts < 1) {
+        printf("[RPK ERROR] No peer certificate/RPK data available\n");
+        return 0;
+    }
+    
+    // Get the first (and only) certificate buffer - this is the RPK
+    const unsigned char* peer_pubkey = store->certs[0].buffer;
+    int peer_pubkey_len = (int)store->certs[0].length;
+    
+    if (peer_pubkey == NULL || peer_pubkey_len <= 0) {
+        printf("[RPK ERROR] Empty peer public key buffer\n");
+        return 0;
+    }
+    
+    printf("[RPK] Received client public key: %d bytes\n", peer_pubkey_len);
+    
+    // Compare with our pre-shared client public key
+    if (peer_pubkey_len != client_pubkey_der_len) {
+        printf("[RPK ERROR] Public key length mismatch: got %d, expected %d\n",
+               peer_pubkey_len, client_pubkey_der_len);
+        return 0;
+    }
+    
+    if (memcmp(peer_pubkey, client_pubkey_der, client_pubkey_der_len) != 0) {
+        printf("[RPK ERROR] Client public key does NOT match pre-shared key!\n");
+        printf("[RPK ERROR] Possible impersonation attempt!\n");
+        return 0;
+    }
+    
+    printf("[RPK OK] Client public key matches pre-shared key\n");
+    printf("[RPK OK] Client identity verified successfully\n");
+    return WOLFSSL_SUCCESS;  // Verification passed
+}
+
 int main(void)
 {
     int sockfd;
@@ -158,7 +217,7 @@ int main(void)
     printf("===============================================================================\n");
     printf("[CONFIG] Algorithm:  ML-KEM-512 (Key Exchange) + ML-DSA-44 (Signatures)\n");
     printf("[CONFIG] Protocol:   DTLS 1.3 (Pure Post-Quantum Cryptography)\n");
-    printf("[CONFIG] Auth:       X.509 Mutual Authentication\n");
+    printf("[CONFIG] Auth:       Raw Public Key (RPK) Mutual Authentication (RFC 7250)\n");
     printf("[CONFIG] Port:       %d (UDP)\n", SERVER_PORT);
     printf("[CONFIG] Interface:  %s\n", TAP_INTERFACE);
     printf("[CONFIG] Pacing:     %dms delay between sends (for 1MHz client)\n", SEND_PACING_MS);
@@ -186,71 +245,75 @@ int main(void)
         return 1;
     }
     printf("[OK] DTLS 1.3 server context created\n");
+    
+    // Disable session tickets to simplify handshake for slow client
+    printf("[CONFIG] Disabling session tickets (simplify handshake)...\n");
+    wolfSSL_CTX_no_ticket_TLSv13(ctx);
+    printf("[OK] Session tickets disabled\n");
     printf("\n");
 
-    // Load server certificate
-    printf("[CERT] Loading certificates and keys...\n");
-    if (client_cert_der_len > 0) {
-        printf("[CERT] Loading server certificate (%d bytes, ML-DSA-44)...\n", client_cert_der_len);
-        // Using client cert as server cert for now (placeholder)
-        ret = wolfSSL_CTX_use_certificate_buffer(ctx, client_cert_der,
-                                                 client_cert_der_len,
-                                                 WOLFSSL_FILETYPE_ASN1);
-        if (ret != WOLFSSL_SUCCESS) {
-            fprintf(stderr, "[ERROR] Failed to load server certificate: %d\n", ret);
-            fprintf(stderr, "[ERROR] Cannot authenticate without certificate\n");
-            return 1;
-        }
-        printf("[OK] Server certificate loaded successfully\n");
-    } else {
-        printf("[WARNING] No server certificate available (placeholder)\n");
-        printf("[WARNING] Using PSK or anonymous mode\n");
+    // ==========================================================================
+    // RAW PUBLIC KEY (RPK) CONFIGURATION - RFC 7250
+    // ==========================================================================
+    // Instead of X.509 certificates, we use Raw Public Keys (SubjectPublicKeyInfo)
+    // which are much lighter weight and perfect for embedded/IoT devices.
+    // Authentication is done by comparing received RPK with pre-shared keys.
+    // ==========================================================================
+    
+    printf("[RPK] Configuring Raw Public Key authentication (RFC 7250)...\n");
+    
+    // Set certificate types - SERVER SIDE:
+    // - server_cert_type: Types WE can SEND (our RPK)
+    // - client_cert_type: Types WE can ACCEPT (client's RPK)
+    char rpk_type[] = {WOLFSSL_CERT_TYPE_RPK};
+    
+    printf("[RPK] Setting server certificate type to RPK...\n");
+    ret = wolfSSL_CTX_set_server_cert_type(ctx, rpk_type, sizeof(rpk_type));
+    if (ret != WOLFSSL_SUCCESS) {
+        fprintf(stderr, "[ERROR] Failed to set server cert type to RPK: %d\n", ret);
+        return 1;
     }
-
-    // Load server private key
-    if (client_key_der_len > 0) {
-        printf("[CERT] Loading server private key (%d bytes, ML-DSA-44)...\n", client_key_der_len);
-        // Using client key as server key for now (placeholder)
-        ret = wolfSSL_CTX_use_PrivateKey_buffer(ctx, client_key_der,
-                                                client_key_der_len,
-                                                WOLFSSL_FILETYPE_ASN1);
-        if (ret != WOLFSSL_SUCCESS) {
-            fprintf(stderr, "[ERROR] Failed to load server private key: %d\n", ret);
-            fprintf(stderr, "[ERROR] Cannot sign handshake without private key\n");
-            return 1;
-        }
-        printf("[OK] Server private key loaded successfully\n");
-    } else {
-        printf("[WARNING] No server private key available (placeholder)\n");
+    printf("[OK] Server will send RPK (not X.509 certificate)\n");
+    
+    printf("[RPK] Setting client certificate type to RPK...\n");
+    ret = wolfSSL_CTX_set_client_cert_type(ctx, rpk_type, sizeof(rpk_type));
+    if (ret != WOLFSSL_SUCCESS) {
+        fprintf(stderr, "[ERROR] Failed to set client cert type to RPK: %d\n", ret);
+        return 1;
     }
+    printf("[OK] Server will accept RPK from client (not X.509 certificate)\n");
     printf("\n");
 
-    // Load CA for client verification
-    if (ca_cert_der_len > 0) {
-        printf("[CERT] Loading CA certificate (%d bytes, ASN.1 DER)...\n", ca_cert_der_len);
-        ret = wolfSSL_CTX_load_verify_buffer(ctx, ca_cert_der, ca_cert_der_len,
+    // Load our public key as the "certificate" (RPK)
+    printf("[RPK] Loading server public key as RPK (%d bytes)...\n", server_pubkey_der_len);
+    ret = wolfSSL_CTX_use_certificate_buffer(ctx, server_pubkey_der,
+                                             server_pubkey_der_len,
                                              WOLFSSL_FILETYPE_ASN1);
-        if (ret != WOLFSSL_SUCCESS) {
-            fprintf(stderr, "[ERROR] Failed to load CA certificate: %d\n", ret);
-            fprintf(stderr, "[ERROR] Client verification will fail\n");
-            return 1;
-        }
-        printf("[OK] CA certificate loaded successfully\n");
-    } else {
-        printf("[WARNING] No CA certificate available (placeholder)\n");
-        printf("[WARNING] Client verification will be skipped\n");
+    if (ret != WOLFSSL_SUCCESS) {
+        fprintf(stderr, "[ERROR] Failed to load server RPK: %d\n", ret);
+        return 1;
     }
+    printf("[OK] Server RPK (public key) loaded successfully\n");
+
+    // Load our private key for signing handshake messages
+    printf("[RPK] Loading server private key (%d bytes, ML-DSA-44)...\n", server_key_der_len);
+    ret = wolfSSL_CTX_use_PrivateKey_buffer(ctx, server_key_der,
+                                            server_key_der_len,
+                                            WOLFSSL_FILETYPE_ASN1);
+    if (ret != WOLFSSL_SUCCESS) {
+        fprintf(stderr, "[ERROR] Failed to load server private key: %d\n", ret);
+        return 1;
+    }
+    printf("[OK] Server private key loaded successfully\n");
     printf("\n");
 
-    // Configure mutual authentication (if certificates available)
-    if (ca_cert_der_len > 0 && client_cert_der_len > 0) {
-        printf("[SECURITY] Configuring mutual authentication...\n");
-        wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER |
-                                    WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
-        printf("[OK] Mutual authentication enabled (verify peer cert)\n");
-    } else {
-        printf("[WARNING] Mutual authentication disabled (missing certificates)\n");
-    }
+    // Configure RPK verification callback for client authentication
+    printf("[RPK] Configuring mutual authentication with verify callback...\n");
+    printf("[RPK] Client public key loaded for verification (%d bytes)\n", client_pubkey_der_len);
+    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER | 
+                                WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                           rpk_verify_callback);
+    printf("[OK] RPK mutual authentication configured\n");
     printf("\n");
 
     // Create UDP socket
@@ -311,6 +374,12 @@ int main(void)
     
     // Use non-blocking mode for DTLS
     wolfSSL_dtls_set_using_nonblock(ssl, 1);
+    
+ 
+    printf("[DTLS] Configuring extended timeouts for 1MHz PQC client...\n");
+    wolfSSL_dtls_set_timeout_init(ssl, 30);  // Initial timeout: 30 seconds
+    wolfSSL_dtls_set_timeout_max(ssl, 120);  // Max timeout: 120 seconds  
+    printf("[OK] DTLS timeouts: initial=30s, max=120s (for 1MHz client)\n");
     
     // Enable DTLS 1.3 stateless cookie exchange (DoS protection)
 #ifdef WOLFSSL_SEND_HRR_COOKIE
@@ -412,7 +481,7 @@ int main(void)
         fprintf(stderr, "[TROUBLESHOOTING]\n");
         fprintf(stderr, "  - Verify client is running on LiteX simulator\n");
         fprintf(stderr, "  - Check tap0 network interface configuration\n");
-        fprintf(stderr, "  - Ensure certificates match (ca_cert.h, server/client certs)\n");
+        fprintf(stderr, "  - Ensure RPK keys match (run: cd certs && ./generate_rpk_keys.sh)\n");
         fprintf(stderr, "  - Verify ARP entry: arp -n | grep %s\n", CLIENT_IP);
         fprintf(stderr, "===============================================================================\n");
         goto cleanup;
@@ -428,9 +497,38 @@ int main(void)
     printf("===============================================================================\n");
     printf("\n");
 
-    // Receive data from client
+    // Receive data from client with extended timeout for 1MHz client
+    // Client needs time to process ACK and prepare application data
     printf("[DATA] Waiting for encrypted data from client...\n");
-    ret = wolfSSL_read(ssl, buffer, sizeof(buffer) - 1);
+    printf("[INFO] Extended timeout: 120 seconds (1MHz client needs time to send data)\n");
+    
+    // Set extended socket timeout for application data
+    struct timeval data_timeout;
+    data_timeout.tv_sec = 120;  // 2 minutes for slow client
+    data_timeout.tv_usec = 0;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &data_timeout, sizeof(data_timeout));
+    
+    // Retry loop - client may need multiple attempts
+    int max_retries = 5;
+    for (int attempt = 1; attempt <= max_retries; attempt++) {
+        printf("[DATA] Attempt %d/%d - waiting for client data...\n", attempt, max_retries);
+        ret = wolfSSL_read(ssl, buffer, sizeof(buffer) - 1);
+        
+        if (ret > 0) {
+            break;  // Got data!
+        }
+        
+        int err = wolfSSL_get_error(ssl, ret);
+        if (err == WOLFSSL_ERROR_WANT_READ) {
+            printf("[INFO] Timeout, retrying... (client at 1MHz may still be processing)\n");
+            continue;
+        } else {
+            // Real error, not just timeout
+            fprintf(stderr, "[ERROR] wolfSSL_read failed with error: %d\n", err);
+            break;
+        }
+    }
+    
     if (ret > 0) {
         buffer[ret] = '\0';
         printf("[OK] Received encrypted data (%d bytes)\n", ret);
@@ -459,7 +557,8 @@ int main(void)
     printf("===============================================================================\n");
     printf("[SUMMARY]\n");
     printf("  ✓ DTLS 1.3 handshake completed successfully\n");
-    printf("  ✓ Client authenticated with PQC certificate\n");
+    printf("  ✓ Client authenticated with Raw Public Key (RPK)\n");
+    printf("  ✓ ML-DSA-44 signatures verified\n");
     printf("  ✓ Secure bidirectional communication established\n");
     printf("  ✓ Data encrypted with quantum-resistant algorithms\n");
     printf("===============================================================================\n");

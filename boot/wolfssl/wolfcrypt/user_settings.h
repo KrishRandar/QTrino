@@ -28,7 +28,8 @@ unsigned int LowResTimer(void);
 #define NO_WRITEV
 #define WOLFSSL_USER_IO
 #define WOLFSSL_SMALL_STACK         // Optimize for small stack usage
-#define WOLFSSL_SMALL_CERT_VERIFY   // Lower memory certificate verification
+// #define WOLFSSL_SMALL_CERT_VERIFY   // DISABLED - incompatible with RPK (RFC 7250)
+                                       // wc_CheckCertSignature expects X.509, not SubjectPublicKeyInfo
 #define NO_FILESYSTEM               // Don't use file system
 #define NO_WOLFSSL_DIR              // Don't use directory access
 #define NO_WOLFSSL_DIR              // Don't use directory access
@@ -122,11 +123,15 @@ unsigned int LowResTimer(void);
 #define WOLFSSL_DILITHIUM_SIGN_SMALL_MEM
 #define WOLFSSL_DILITHIUM_VERIFY_SMALL_MEM
 
-// ============= X.509 CERTIFICATE SUPPORT =============
-#define WOLFSSL_CERT_GEN             // Certificate generation
-#define WOLFSSL_CERT_EXT             // Certificate extensions
+// ============= RAW PUBLIC KEY (RPK) SUPPORT =============
+// RFC 7250 - Using Raw Public Keys in TLS/DTLS
+// Replaces X.509 certificates with lightweight SubjectPublicKeyInfo
+#define HAVE_RPK                     // Enable Raw Public Key support
+#define WOLFSSL_ALWAYS_VERIFY_CB     // Always call verify callback (needed for RPK verification)
+
+// ============= X.509 CERTIFICATE SUPPORT (MINIMAL) =============
+// Still needed for ASN.1 parsing of SubjectPublicKeyInfo in RPK
 #define WOLFSSL_ASN_TEMPLATE         // ASN.1 template parsing
-#define HAVE_PKCS7                   // PKCS#7 support
 
 // ============= KEY DERIVATION =============
 #define HAVE_HKDF                    // HKDF for key derivation

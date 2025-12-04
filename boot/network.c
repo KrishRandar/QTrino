@@ -107,8 +107,10 @@ int network_send(const uint8_t* data, int len) {
 // RECEIVE UDP PACKET
 int network_recv(uint8_t* buffer, int max_len, int timeout_ms) {
     // Simple busy-wait timeout calibration for ~1MHz CPU
-    // This is approximate but sufficient for bare-metal
-    volatile int timeout_counter = timeout_ms * 2000; 
+    // At 1MHz, each loop iteration takes ~50 cycles, so:
+    // 1000ms / (50 cycles * 1us/cycle) = 1000ms / 50us = 20000 iterations/sec
+    // So timeout_ms * 20 gives roughly correct timing
+    volatile int timeout_counter = timeout_ms * 20; 
     
     while (timeout_counter > 0) {
         // processes incoming packets (calls udp_rx_callback)

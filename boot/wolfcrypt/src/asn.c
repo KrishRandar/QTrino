@@ -23685,16 +23685,22 @@ static int DecodeCertInternal(DecodedCert* cert, int verify, int* criticalExt,
         ret = GetCertKey(cert, cert->source, &pubKeyOffset, pubKeyEnd);
         if (ret == 0) {
             WOLFSSL_MSG("Raw Public Key certificate found and parsed");
+            WOLFSSL_MSG("RPK: Setting isRPK=1 and returning success");
             cert->isRPK = 1;
+        }
+        else {
+            WOLFSSL_MSG("RPK: GetCertKey failed");
         }
     }
     /* Dispose of memory before allocating for extension decoding. */
     FREE_ASNGETDATA(RPKdataASN, cert->heap);
 
     if (ret == 0) {
+        WOLFSSL_MSG("RPK: Returning success from DecodeCertInternal");
         return ret;
     }
     else {
+        WOLFSSL_MSG("RPK: Falling through to X.509 parsing");
         ret = 0;    /* proceed to the original x509 parsing */
     }
 #endif /* HAVE_RPK */
@@ -25632,6 +25638,7 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm,
 #endif
         {
             ret = DecodeCert(cert, verify, &cert->criticalExt);
+            WOLFSSL_MSG_EX("ParseCertRelative: DecodeCert returned %d, isRPK=%d", ret, cert->isRPK);
             if (ret == WC_NO_ERR_TRACE(ASN_BEFORE_DATE_E) ||
                 ret == WC_NO_ERR_TRACE(ASN_AFTER_DATE_E)) {
                 cert->badDate = ret;
@@ -25639,11 +25646,13 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm,
                     ret = 0;
             }
             else if (ret < 0) {
+                WOLFSSL_MSG_EX("ParseCertRelative: DecodeCert error %d", ret);
                 WOLFSSL_ERROR_VERBOSE(ret);
                 return ret;
             }
 #if defined(HAVE_RPK)
             if (cert->isRPK) {
+                WOLFSSL_MSG("ParseCertRelative: RPK detected, returning early");
                 return ret;
             }
 #endif /* HAVE_RPK */
