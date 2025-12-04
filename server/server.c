@@ -37,7 +37,7 @@
 // The 1MHz LiteX client takes ~3 seconds to process each packet
 // CRITICAL: 500ms was too fast - client drops packets while processing!
 // Increased to 3000ms to match client's actual processing speed
-#define SEND_PACING_MS 2500
+#define SEND_PACING_MS 1750
 
 // Quick timeout multiplier for DTLS 1.3
 #define QUICK_MULT  4
@@ -246,10 +246,19 @@ int main(void)
     }
     printf("[OK] DTLS 1.3 server context created\n");
     
-    // Disable session tickets to simplify handshake for slow client
-    printf("[CONFIG] Disabling session tickets (simplify handshake)...\n");
-    wolfSSL_CTX_no_ticket_TLSv13(ctx);
-    printf("[OK] Session tickets disabled\n");
+    // Enable session tickets for resumption
+    printf("[CONFIG] Enabling session tickets for resumption...\n");
+    ret = wolfSSL_CTX_UseSessionTicket(ctx);
+    if (ret != WOLFSSL_SUCCESS) {
+        fprintf(stderr, "[WARNING] Failed to enable session tickets: %d\n", ret);
+        fprintf(stderr, "[WARNING] Session resumption will not be available\n");
+    } else {
+        printf("[OK] Session tickets enabled\n");
+        
+        // Set ticket lifetime (in seconds) - 5 minutes
+        wolfSSL_CTX_set_TicketHint(ctx, 300);
+        printf("[OK] Session ticket lifetime: 300 seconds (5 minutes)\n");
+    }
     printf("\n");
 
     // ==========================================================================
@@ -307,13 +316,12 @@ int main(void)
     printf("[OK] Server private key loaded successfully\n");
     printf("\n");
 
-    // Configure RPK verification callback for client authentication
+    // Configure mutual authentication with RPK verification callback
     printf("[RPK] Configuring mutual authentication with verify callback...\n");
-    printf("[RPK] Client public key loaded for verification (%d bytes)\n", client_pubkey_der_len);
-    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER | 
-                                WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT,
-                           rpk_verify_callback);
-    printf("[OK] RPK mutual authentication configured\n");
+    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                          rpk_verify_callback);
+    printf("[OK] Server will request and verify client RPK\n");
+    printf("[OK] Mutual authentication enabled (both parties authenticate)\n");
     printf("\n");
 
     // Create UDP socket
@@ -359,15 +367,53 @@ int main(void)
     printf("[OK] Socket bound to port %d\n", SERVER_PORT);
     printf("\n");
 
-    // Create SSL session
-    printf("[SSL] Creating SSL session object...\n");
-    ssl = wolfSSL_new(ctx);
-    if (!ssl) {
-        fprintf(stderr, "[ERROR] Failed to create SSL session\n");
-        fprintf(stderr, "[ERROR] Check context configuration and memory\n");
-        return 1;
+    // ========== CONNECTION LOOP FOR SESSION RESUMPTION TESTING ==========
+    // Handle 2 connections to test session resumption
+    // Connection #1: Full handshake with session ticket issuance
+    // Connection #2: Resumed handshake using the ticket from connection #1
+    #define NUM_CONNECTIONS 2
+    
+    for (int conn = 1; conn <= NUM_CONNECTIONS; conn++) {
+        printf("\n");
+        printf("===============================================================================\n");
+        printf("                   CONNECTION #%d/%d\n", conn, NUM_CONNECTIONS);
+        printf("===============================================================================\n");
+        if (conn == 1) {
+            printf("[INFO] Expecting full handshake with session ticket issuance\n");
+        } else {
+            printf("[INFO] Expecting session resumption (if client presents valid ticket)\n");
+        }
+        printf("\n");
+
+        // Create SSL session
+        printf("[SSL] Creating SSL session object...\n");
+        ssl = wolfSSL_new(ctx);
+        if (!ssl) {
+            fprintf(stderr, "[ERROR] Failed to create SSL session\n");
+            fprintf(stderr, "[ERROR] Check context configuration and memory\n");
+            continue;  // Try next connection
+        }
+        printf("[OK] SSL session created\n");
+    
+    // ========== CRITICAL FOR DTLS 1.3 PSK SESSION RESUMPTION ==========
+    // Skip HelloRetryRequest (HRR) cookie exchange when client presents valid PSK
+    // This is REQUIRED for session resumption to work with DTLS 1.3
+    #ifdef WOLFSSL_DTLS13_NO_HRR_ON_RESUME
+    printf("[SESSION] Configuring PSK resumption behavior...\n");
+    ret = wolfSSL_dtls13_no_hrr_on_resume(ssl, 1);
+    if (ret != WOLFSSL_SUCCESS) {
+        fprintf(stderr, "[WARNING] Failed to set no-HRR-on-resume: %d\n", ret);
+        fprintf(stderr, "[WARNING] Session resumption may not work!\n");
     }
-    printf("[OK] SSL session created\n");
+    else {
+        printf("[SESSION] ✓ HRR cookie exchange will be skipped on PSK resumption\n");
+        printf("[SESSION] This enables fast session resumption without re-doing PQC operations\n");
+    }
+    #else
+    printf("[WARNING] WOLFSSL_DTLS13_NO_HRR_ON_RESUME not defined!\n");
+    printf("[WARNING] Session resumption will NOT work - recompile with this flag\n");
+    #endif
+    printf("\n");
     
     // Store socket in global for callbacks
     g_sockfd = sockfd;
@@ -382,6 +428,8 @@ int main(void)
     printf("[OK] DTLS timeouts: initial=30s, max=120s (for 1MHz client)\n");
     
     // Enable DTLS 1.3 stateless cookie exchange (DoS protection)
+    // Note: This is required for DTLS 1.3 and provides protection against
+    // UDP amplification attacks by verifying client reachability
 #ifdef WOLFSSL_SEND_HRR_COOKIE
     {
         // Applications should update this secret periodically in production
@@ -398,6 +446,7 @@ int main(void)
 #else
     printf("[INFO] WOLFSSL_SEND_HRR_COOKIE not enabled (compile-time option)\n");
 #endif
+    printf("\n");
     
     // Register custom I/O callbacks with pacing
     // This adds delays between sends to let the slow 1MHz client process packets
@@ -493,6 +542,16 @@ int main(void)
     printf("===============================================================================\n");
     printf("[SUCCESS] Secure channel established with client\n");
     printf("[SUCCESS] Client authenticated successfully\n");
+    
+    // Check if session was resumed
+    if (wolfSSL_session_reused(ssl)) {
+        printf("[SESSION] ✓ Session RESUMED from client ticket\n");
+        printf("[PERF] Skipped expensive PQC key exchange and signatures\n");
+    } else {
+        printf("[SESSION] Full handshake performed (new session)\n");
+        printf("[INFO] Client can resume this session on next connection\n");
+    }
+    
     showConnInfo(ssl);
     printf("===============================================================================\n");
     printf("\n");
@@ -563,10 +622,32 @@ int main(void)
     printf("  ✓ Data encrypted with quantum-resistant algorithms\n");
     printf("===============================================================================\n");
 
+        // Clean up THIS connection's SSL session (but keep context alive!)
+        printf("\n[CONNECTION] Cleaning up connection #%d resources...\n", conn);
+        wolfSSL_free(ssl);
+        ssl = NULL;
+        printf("[OK] SSL session freed\n");
+        
+        if (conn < NUM_CONNECTIONS) {
+            printf("\n[INFO] Waiting for next client connection...\n");
+            printf("[INFO] Ticket encryption keys preserved for session resumption\n");
+        }
+    } // End connection loop
+    
+    printf("\n");
+    printf("===============================================================================\n");
+    printf("              ALL CONNECTIONS COMPLETE (%d/%d)\n", NUM_CONNECTIONS, NUM_CONNECTIONS);
+    printf("===============================================================================\n");
+    printf("[SUCCESS] Session resumption test complete\n");
+    printf("[INFO] Review logs to verify if connection #2 resumed the session\n");
+    printf("===============================================================================\n");
+
 cleanup:
-    printf("\n[CLEANUP] Cleaning up resources...\n");
-    wolfSSL_free(ssl);
-    printf("[OK] SSL session freed\n");
+    printf("\n[CLEANUP] Cleaning up final resources...\n");
+    if (ssl) {
+        wolfSSL_free(ssl);
+        printf("[OK] SSL session freed\n");
+    }
     wolfSSL_CTX_free(ctx);
     printf("[OK] SSL context freed\n");
     wolfSSL_Cleanup();

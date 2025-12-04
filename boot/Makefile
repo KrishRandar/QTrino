@@ -35,6 +35,11 @@ vpath %.a $(PACKAGES:%=../%)
 CFLAGS += $(INC) 
 CFLAGS += -DWOLFSSL_USER_SETTINGS
 
+# Force enable session cache by undefining the blockers
+# settings.h auto-defines these due to NO_ASN_TIME, we override at compile time
+CFLAGS += -UNO_SESSION_CACHE
+CFLAGS += -UNO_CLIENT_CACHE
+
 boot.elf: $(OBJECTS)
 	$(CC) $(LDFLAGS) -T linker.ld -N -o $@ \
 		$(OBJECTS) \

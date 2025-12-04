@@ -1,6 +1,11 @@
 #ifndef USER_SETTINGS_H
 #define USER_SETTINGS_H
 
+// ============= SESSION CACHE CONTROL =============
+// NOTE: settings.h will try to auto-define NO_SESSION_CACHE and NO_CLIENT_CACHE
+// due to NO_ASN_TIME. We override this via Makefile CFLAGS (-UNO_SESSION_CACHE)
+// Do NOT define them here - let the Makefile -U flags handle it
+
 // WOLFCRYPT_ONLY removed - enabling full DTLS 1.3 support
 
 #define WOLFSSL_SP_MATH // maths backend for crypto
@@ -144,5 +149,11 @@ unsigned int LowResTimer(void);
 
 extern int CustomRngGenerateBlock(unsigned char *, unsigned int);
 #define CUSTOM_RAND_GENERATE_SEED CustomRngGenerateBlock
+
+// Session tickets enabled via Makefile -UNO_SESSION_CACHE flag
+
+// Disable default ticket encryption callback (it requires time functions we don't have)
+// We'll need to provide a custom callback or let wolfSSL handle it differently
+#define WOLFSSL_NO_DEF_TICKET_ENC_CB
 
 #endif // USER_SETTINGS_H

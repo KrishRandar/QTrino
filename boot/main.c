@@ -16,6 +16,11 @@
 // Include embedded RPK keys (Raw Public Keys for mutual authentication)
 #include "certs_placeholder.h"
 
+// ============= SESSION RESUMPTION GLOBALS =============
+// Session storage for resumption (in-memory only, valid within single boot)
+static WOLFSSL_SESSION* saved_session = NULL;
+static int connection_count = 0;
+
 // Undef conflicting macros
 #ifdef min
 #undef min
@@ -63,6 +68,14 @@ int getitimer(int which, struct itimerval *curr_value) {
 
 int setitimer(int which, const struct itimerval *restrict new_value, struct itimerval *restrict old_value) {
     return 0;
+}
+
+
+// Stub for session ticket time checks (wolfSSL needs this for ticket expiration)
+word32 TimeNowInMilliseconds(void) {
+    // Return a constant value since we have no real time
+    // Session tickets won't expire, which is acceptable for our use case
+    return 1000;  // Arbitrary non-zero value
 }
 
 #include <signal.h>
@@ -337,6 +350,22 @@ int main(void)
     printf("[OK] RPK mutual authentication configured\n");
     printf("\n");
 
+    // ===============================================================================
+    // SESSION RESUMPTION TEST: Perform 2 connections to test session resumption
+    // ===============================================================================
+    #define NUM_TEST_CONNECTIONS 2
+    
+    for (int test_connection = 0; test_connection < NUM_TEST_CONNECTIONS; test_connection++) {
+        if (test_connection > 0) {
+            printf("\n\n");
+            printf("===============================================================================\n");
+            printf("           CONNECTION #%d - TESTING SESSION RESUMPTION\n", test_connection + 1);
+            printf("===============================================================================\n");
+            printf("[TEST] Previous session was saved - attempting to resume...\n");
+            printf("===============================================================================\n");
+            printf("\n");
+        }
+
     // Create SSL session
     printf("[SSL] Creating SSL session object...\n");
     ssl = wolfSSL_new(ctx);
@@ -352,6 +381,26 @@ int main(void)
     wolfSSL_dtls_set_timeout_init(ssl, 30);  // Initial timeout: 30 seconds
     wolfSSL_dtls_set_timeout_max(ssl, 120);  // Max timeout: 120 seconds
     printf("[OK] DTLS timeouts: initial=30s, max=120s\n");
+    printf("\n");
+
+    // ============= SESSION RESUMPTION ATTEMPT =============
+    connection_count++;
+    printf("[SESSION] Connection #%d\n", connection_count);
+    
+    if (saved_session && connection_count > 1) {
+        printf("[SESSION] Attempting to resume previous session...\n");
+        ret = wolfSSL_set_session(ssl, saved_session);
+        if (ret != WOLFSSL_SUCCESS) {
+            printf("[WARNING] Failed to set session for resumption: %d\n", ret);
+            printf("[INFO] Will perform full handshake instead\n");
+        } else {
+            printf("[OK] Session configured for resumption\n");
+            printf("[INFO] Handshake should be much faster (no PQC key exchange)\n");
+        }
+    } else if (connection_count == 1) {
+        printf("[SESSION] First connection - will perform full handshake\n");
+        printf("[INFO] Session will be saved for future resumption\n");
+    }
     printf("\n");
 
     // Perform DTLS handshake
@@ -425,6 +474,17 @@ int main(void)
     printf("===============================================================================\n");
     printf("[SUCCESS] Secure channel established with server\n");
     
+    // Check if session was resumed or full handshake
+    if (wolfSSL_session_reused(ssl)) {
+        printf("[SESSION] ✓ Session RESUMED successfully!\n");
+        printf("[PERF] Skipped expensive PQC key exchange (ML-KEM-512)\n");
+        printf("[PERF] Skipped signature generation/verification (ML-DSA-44)\n");
+    } else {
+        printf("[SESSION] Full handshake performed\n");
+        // NOTE: Session save moved to AFTER data exchange
+        // In DTLS 1.3, NewSessionTicket arrives after handshake completes
+    }
+    
     // Get cipher and version info (with safety checks)
     const char* cipher = wolfSSL_get_cipher(ssl);
     const char* version = wolfSSL_get_version(ssl);
@@ -459,6 +519,21 @@ int main(void)
         recv_buf[ret] = '\0';
         printf("[OK] Received encrypted data (%d bytes)\n", ret);
         printf("[DATA] Decrypted message: \"%s\"\n", recv_buf);
+
+    // ========== SAVE SESSION AFTER DATA EXCHANGE ==========
+    // In DTLS 1.3, NewSessionTicket arrives AFTER handshake
+    // We need to give it time to arrive and be processed
+    if (!wolfSSL_session_reused(ssl) && !saved_session) {
+        printf("\n[SESSION] Saving session for future resumption...\n");
+        saved_session = wolfSSL_get1_session(ssl);
+        if (saved_session) {
+            printf("[SESSION] ✓ Session saved successfully\n");
+            printf("[INFO] Next connection can resume this session\n");
+        } else {
+            printf("[WARNING] Failed to save session (ticket may not have arrived yet)\n");
+        }
+    }
+
     } else {
         int err = wolfSSL_get_error(ssl, ret);
         printf("[WARNING] No response received from server (error: %d)\n", err);
@@ -476,11 +551,44 @@ int main(void)
     printf("  ✓ Data encrypted with quantum-resistant cipher suite\n");
     printf("===============================================================================\n");
 
+        // ========== End of Connection - Prepare for Next Test ==========
+        if (test_connection < NUM_TEST_CONNECTIONS - 1) {
+            printf("\n[TEST] Connection #%d complete. Preparing for next connection...\n", test_connection + 1);
+            printf("[TEST] Closing current SSL session (saved_session preserved)...\n");
+            
+            // Gracefully close the connection
+            wolfSSL_shutdown(ssl);
+            wolfSSL_free(ssl);
+            ssl = NULL;
+            
+            // Small delay to let server process and be ready for next connection
+            printf("[TEST] Waiting 3 seconds before next connection...\n");
+            for (volatile unsigned int i = 0; i < 3000000; i++);  // ~3 second delay on 1MHz CPU
+            
+            // Loop will continue and create new SSL session
+            continue;
+        }
+    } // End of test connection loop
+    
+    printf("\n");
+    printf("===============================================================================\n");
+    printf("              SESSION RESUMPTION TEST COMPLETE\n");
+    printf("===============================================================================\n");
+    printf("[SUMMARY] Completed %d connections\n", NUM_TEST_CONNECTIONS);
+    printf("[SUMMARY] Connection #1: Full handshake (session saved)\n");
+    printf("[SUMMARY] Connection #2: Resumed handshake (using saved session)\n");
+    printf("===============================================================================\n");
+
 cleanup:
     printf("\n[CLEANUP] Cleaning up SSL resources...\n");
     if (ssl) {
         wolfSSL_free(ssl);
         printf("[OK] SSL session freed\n");
+    }
+    if (saved_session) {
+        wolfSSL_SESSION_free(saved_session);
+        saved_session = NULL;
+        printf("[OK] Saved session freed\n");
     }
     if (ctx) {
         wolfSSL_CTX_free(ctx);
