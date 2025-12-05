@@ -132,6 +132,8 @@ litex_bare_metal_demo --build-path=build/sim
 
 > **Note:** RPK keys are already included in `certs/client_rpk.h` and `certs/server_rpk.h`. No key generation required!
 
+**Working Directory:** `/path/to/QTrino/boot`
+
 ```bash
 cd boot
 make clean
@@ -142,16 +144,12 @@ make
 
 > **Included:** Pre-generated ML-DSA-44 RPK keys are compiled into the firmware
 
-**Build includes:**
-- wolfSSL library with PQC support
-- RISC-V cycle counter utilities (`performance.c/h`)
-- 4MB static memory for PQC operations
-- Configurable throughput testing
-
 ### Step 4: Build Server Application
 
+**Working Directory:** `/path/to/QTrino/server`
+
 ```bash
-cd ../server
+cd server
 make clean
 make
 ```
@@ -162,9 +160,22 @@ make
 
 ## ▶️ Running the Demo
 
+> **Prerequisites Before Running:**
+> 1. **Activate virtual environment**: `source litex-env/bin/activate` (from QTrino root)
+> 2. **Navigate to project root**: `cd /path/to/QTrino`
+> 3. All commands below assume you're in the QTrino project directory
+
+You'll need **two terminals** - one for the client simulator, one for the server.
+
 ### Terminal 1: Start RISC-V Client
 
+**Working Directory:** `/path/to/QTrino` (project root)
+
 ```bash
+# Make sure virtual environment is activated
+source litex-env/bin/activate
+
+# Run the simulator
 litex_sim --csr-json csr.json \
   --cpu-type=vexriscv \
   --cpu-variant=full \
@@ -173,12 +184,17 @@ litex_sim --csr-json csr.json \
   --ram-init=boot/boot.bin
 ```
 
-Wait 2-3 seconds for initialization.
+Wait 2-3 seconds for initialization before starting the server.
 
 ### Terminal 2: Start Server
 
+**Working Directory:** `/path/to/QTrino/server`
+
 ```bash
+# Navigate to server directory
 cd server
+
+# Run the server (no virtual environment needed)
 ./server
 ```
 
