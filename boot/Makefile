@@ -12,7 +12,7 @@ WOLFCRYPT_SRCS = $(wildcard wolfcrypt/src/*.c)
 WOLFSSL_SRCS = $(wildcard wolfssl/src/*.c)
 
 # Main objects
-OBJECTS  = crt0.o main.o network.o
+OBJECTS  = crt0.o main.o network.o performance.o
 
 # Add wolfcrypt and wolfssl objects
 OBJECTS += $(WOLFCRYPT_SRCS:.c=.o)

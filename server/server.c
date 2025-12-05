@@ -30,6 +30,14 @@
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 
+// ============================================================================
+// PERFORMANCE TEST CONFIGURATION
+// ============================================================================
+// MUST match client configuration for proper throughput testing
+#define THROUGHPUT_TEST_COUNT 50    // Number of iterations (must match client)
+#define THROUGHPUT_PKT_SIZE 1024    // Packet size in bytes (must match client)
+// ============================================================================
+
 // Include embedded RPK keys (server private key + client public key for verification)
 #include "server_rpk.h"
 
@@ -232,7 +240,7 @@ int main(void)
     
     // Enable debugging to see received data
     printf("[DEBUG] Enabling wolfSSL debug output...\n");
-    wolfSSL_Debugging_ON();
+    // wolfSSL_Debugging_ON();  // Disabled for clean output (enable for troubleshooting)
     printf("[OK] Debug logging enabled\n");
     printf("\n");
 
@@ -609,6 +617,50 @@ int main(void)
         int err = wolfSSL_get_error(ssl, ret);
         fprintf(stderr, "[ERROR] Failed to receive data: %d (error: %d)\n", ret, err);
     }
+    printf("\n");
+
+    // ============= THROUGHPUT ECHO TEST =============
+    printf("===============================================================================\n");
+    printf("                    THROUGHPUT ECHO TEST\n");
+    printf("===============================================================================\n");
+    printf("[INFO] Receiving and echoing %d packets (%d bytes each)\n", THROUGHPUT_TEST_COUNT, THROUGHPUT_PKT_SIZE);
+    printf("\n");
+    
+    int echo_successful = 0;
+    for (int i = 0; i < THROUGHPUT_TEST_COUNT; i++) {
+        // Receive packet from client
+        ret = wolfSSL_read(ssl, buffer, THROUGHPUT_PKT_SIZE);
+        if (ret <= 0) {
+            int err = wolfSSL_get_error(ssl, ret);
+            if (err == WOLFSSL_ERROR_WANT_READ) {
+                // Timeout - retry
+                i--;
+                continue;
+            }
+            fprintf(stderr, "[ERROR] Echo test read failed at iteration %d (error: %d)\n", i, err);
+            break;
+        }
+        
+        // Echo packet back
+        ret = wolfSSL_write(ssl, buffer, THROUGHPUT_PKT_SIZE);
+        if (ret <= 0) {
+            int err = wolfSSL_get_error(ssl, ret);
+            fprintf(stderr, "[ERROR] Echo test write failed at iteration %d (error: %d)\n", i, err);
+            break;
+        }
+        
+        echo_successful++;
+        
+        // Progress indicator every 10 iterations
+        if ((i + 1) % 10 == 0) {
+            printf("[ECHO] %d/%d packets echoed\n", i + 1, THROUGHPUT_TEST_COUNT);
+        }
+    }
+    
+    printf("\n");
+    printf("[PERF] Throughput echo test complete\n");
+    printf("[PERF] Successfully echoed: %d/%d packets\n", echo_successful, THROUGHPUT_TEST_COUNT);
+    printf("===============================================================================\n");
     printf("\n");
 
     printf("===============================================================================\n");
