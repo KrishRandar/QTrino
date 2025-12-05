@@ -31,8 +31,14 @@
 #define HAVE_AESGCM
 #define HAVE_SHA256
 #define HAVE_SHA384
-#define WOLFSSL_AES_128_GCM_SHA256
-#define WOLFSSL_AES_256_GCM_SHA384
+#define WOLFSSL_AES_128              // Required for AES-128-GCM-SHA256
+#define WOLFSSL_AES_128_GCM_SHA256   // TLS_AES_128_GCM_SHA256 (fallback)
+// NOTE: AES-256 disabled - ChaCha20-Poly1305 preferred for software-only RISC-V performance
+
+// Enable ChaCha20-Poly1305 (optimized for software-only RISC-V)
+#define HAVE_CHACHA                  // ChaCha20 stream cipher
+#define HAVE_POLY1305                // Poly1305 MAC
+#define HAVE_AEAD                    // AEAD support
 
 // Disable Classical Algorithms (Pure PQC)
 #define NO_RSA

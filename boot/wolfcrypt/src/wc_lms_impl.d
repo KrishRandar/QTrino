@@ -47,7 +47,10 @@ wolfcrypt/src/wc_lms_impl.o: wolfcrypt/src/wc_lms_impl.c \
  /home/heck/QTrino/pythondata-software-picolibc/pythondata_software_picolibc/data/newlib/libc/include/sys/syslimits.h \
  /usr/lib/gcc/riscv64-unknown-elf/14.2.0/include/limits.h \
  wolfssl/wolfcrypt/error-crypt.h wolfssl/wolfcrypt/logging.h \
- wolfssl/wolfcrypt/wc_lms.h wolfcrypt/src/misc.c wolfssl/wolfcrypt/misc.h
+ wolfssl/wolfcrypt/wc_lms.h wolfcrypt/src/misc.c wolfssl/wolfcrypt/misc.h \
+ wolfssl/wolfcrypt/hash.h wolfssl/wolfcrypt/sha.h \
+ wolfssl/wolfcrypt/sha256.h wolfssl/wolfcrypt/sha512.h \
+ wolfssl/wolfcrypt/sha3.h
 wolfssl/wolfcrypt/libwolfssl_sources.h:
 wolfssl/wolfcrypt/types.h:
 wolfssl/wolfcrypt/settings.h:
@@ -104,3 +107,8 @@ wolfssl/wolfcrypt/logging.h:
 wolfssl/wolfcrypt/wc_lms.h:
 wolfcrypt/src/misc.c:
 wolfssl/wolfcrypt/misc.h:
+wolfssl/wolfcrypt/hash.h:
+wolfssl/wolfcrypt/sha.h:
+wolfssl/wolfcrypt/sha256.h:
+wolfssl/wolfcrypt/sha512.h:
+wolfssl/wolfcrypt/sha3.h:

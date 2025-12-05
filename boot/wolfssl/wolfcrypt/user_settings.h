@@ -95,8 +95,9 @@ unsigned int LowResTimer(void);
 #define HAVE_AESGCM
 #define HAVE_SHA256
 #define HAVE_SHA384
-#define WOLFSSL_AES_128_GCM_SHA256   // TLS_AES_128_GCM_SHA256
-#define WOLFSSL_AES_256_GCM_SHA384   // TLS_AES_256_GCM_SHA384isable old TLS versions
+#define WOLFSSL_AES_128              // Required for AES-128-GCM-SHA256
+#define WOLFSSL_AES_128_GCM_SHA256   // TLS_AES_128_GCM_SHA256 (fallback)
+// NOTE: AES-256 disabled - ChaCha20-Poly1305 preferred for software-only RISC-V performance
 // NOTE: ECC, X25519, ED25519 disabled by NOT defining HAVE_ECC, HAVE_X25519, etc.
 
 // ============= REQUIRED HASH FUNCTIONS =============

@@ -49,7 +49,9 @@ wolfcrypt/src/aes.o: wolfcrypt/src/aes.c \
  wolfssl/wolfcrypt/error-crypt.h wolfssl/wolfcrypt/logging.h \
  wolfssl/wolfcrypt/aes.h wolfssl/wolfcrypt/random.h \
  wolfssl/wolfcrypt/sha256.h wolfssl/wolfcrypt/cpuid.h \
- wolfcrypt/src/misc.c wolfssl/wolfcrypt/misc.h
+ wolfcrypt/src/misc.c wolfssl/wolfcrypt/misc.h wolfssl/wolfcrypt/hash.h \
+ wolfssl/wolfcrypt/sha.h wolfssl/wolfcrypt/sha512.h \
+ wolfssl/wolfcrypt/sha3.h
 wolfssl/wolfcrypt/libwolfssl_sources.h:
 wolfssl/wolfcrypt/types.h:
 wolfssl/wolfcrypt/settings.h:
@@ -109,3 +111,7 @@ wolfssl/wolfcrypt/sha256.h:
 wolfssl/wolfcrypt/cpuid.h:
 wolfcrypt/src/misc.c:
 wolfssl/wolfcrypt/misc.h:
+wolfssl/wolfcrypt/hash.h:
+wolfssl/wolfcrypt/sha.h:
+wolfssl/wolfcrypt/sha512.h:
+wolfssl/wolfcrypt/sha3.h:

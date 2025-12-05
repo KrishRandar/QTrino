@@ -61,7 +61,7 @@ typedef struct {
     uint32_t throughput_iterations;
     uint64_t throughput_start;
     uint64_t throughput_end;
-    float throughput_bps;  // bytes per second
+    uint32_t throughput_bps;  // bytes per second 
     
     // Memory metrics (from wolfSSL)
     uint32_t peak_ram_bytes;

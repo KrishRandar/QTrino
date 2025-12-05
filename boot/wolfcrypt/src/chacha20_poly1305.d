@@ -49,7 +49,9 @@ wolfcrypt/src/chacha20_poly1305.o: wolfcrypt/src/chacha20_poly1305.c \
  wolfssl/wolfcrypt/error-crypt.h wolfssl/wolfcrypt/logging.h \
  wolfssl/wolfcrypt/chacha20_poly1305.h wolfssl/wolfcrypt/chacha.h \
  wolfssl/wolfcrypt/poly1305.h wolfcrypt/src/misc.c \
- wolfssl/wolfcrypt/misc.h
+ wolfssl/wolfcrypt/misc.h wolfssl/wolfcrypt/hash.h \
+ wolfssl/wolfcrypt/sha.h wolfssl/wolfcrypt/sha256.h \
+ wolfssl/wolfcrypt/sha512.h wolfssl/wolfcrypt/sha3.h
 wolfssl/wolfcrypt/libwolfssl_sources.h:
 wolfssl/wolfcrypt/types.h:
 wolfssl/wolfcrypt/settings.h:
@@ -108,3 +110,8 @@ wolfssl/wolfcrypt/chacha.h:
 wolfssl/wolfcrypt/poly1305.h:
 wolfcrypt/src/misc.c:
 wolfssl/wolfcrypt/misc.h:
+wolfssl/wolfcrypt/hash.h:
+wolfssl/wolfcrypt/sha.h:
+wolfssl/wolfcrypt/sha256.h:
+wolfssl/wolfcrypt/sha512.h:
+wolfssl/wolfcrypt/sha3.h:
