@@ -147,8 +147,16 @@ unsigned int LowResTimer(void);
 #define SHOW_GEN
 #define DEBUG_WOLFSSL_VERBOSE
 
-extern int CustomRngGenerateBlock(unsigned char *, unsigned int);
-#define CUSTOM_RAND_GENERATE_SEED CustomRngGenerateBlock
+// ============= PRODUCTION ENTROPY SOURCE =============
+// Custom RNG using RISC-V cycle counter for timing jitter
+// wolfEntropy (HAVE_ENTROPY_MEMUSE) requires clock_gettime() which is not
+// available on bare-metal, so we use a custom seed generator instead.
+// This provides better entropy than basic LCG by using CPU timing jitter.
+extern int CustomRngGenerateSeed(unsigned char *, unsigned int);
+#define CUSTOM_RAND_GENERATE_SEED CustomRngGenerateSeed
+
+// Disable /dev/random (not available on bare-metal)
+#define NO_DEV_RANDOM
 
 // Session tickets enabled via Makefile -UNO_SESSION_CACHE flag
 

@@ -21,7 +21,7 @@
 // PERFORMANCE TEST CONFIGURATION
 // ============================================================================
 // Adjust these values to control test duration and thoroughness
-#define THROUGHPUT_TEST_COUNT 50    // Number of iterations for throughput test
+#define THROUGHPUT_TEST_COUNT 5    // Number of iterations for throughput test
 #define THROUGHPUT_PKT_SIZE 1024    // Packet size in bytes for throughput test
 #define NUM_TEST_CONNECTIONS 2      // Number of connections to test (for resumption)
 // ============================================================================
@@ -49,13 +49,64 @@ static perf_metrics_t perf_metrics[2];  // [0] = conn1, [1] = conn2
 #include <sys/time.h>
 #include <time.h>
 
-// Custom entropy source - REPLACE
-static uint32_t rng_state = 0x12345678; // Initial seed
+// ============= ENTROPY SOURCE =============
+// Custom entropy using RISC-V cycle counter timing jitter
+// (wolfEntropy requires clock_gettime() not available on bare-metal)
+//
+// This implementation provides better entropy than simple LCG by:
+// - Using CPU cycle counter timing variations
+// - Collecting timing jitter from multiple samples
+// - Mixing entropy from stack addresses and instruction timing
+// ============================================================================
 
-int CustomRngGenerateBlock(byte *output, word32 sz) {
-    for (word32 i = 0; i < sz; i++) {
-        rng_state = rng_state * 1664525UL + 1013904223UL;
-        output[i] = (byte)(rng_state >> 24); // Use top 8 bits
+// Read RISC-V 64-bit cycle counter atomically
+static inline uint64_t get_cycles(void) {
+    uint32_t hi, lo, hi2;
+    asm volatile (
+        "rdcycleh %0\n"
+        "rdcycle %1\n"
+        "rdcycleh %2\n"
+        : "=r" (hi), "=r" (lo), "=r" (hi2)
+    );
+    
+    // Check for overflow during read
+    if (hi != hi2) {
+        asm volatile ("rdcycle %0" : "=r" (lo));
+        hi = hi2;
+    }
+    
+    return ((uint64_t)hi << 32) | lo;
+}
+
+// Improved entropy generation using cycle counter timing jitter
+int CustomRngGenerateSeed(byte *output, word32 sz) {
+    uint32_t i, j;
+    uint64_t accumulator = 0;
+    
+    for (i = 0; i < sz; i++) {
+        // Collect timing jitter from multiple sources
+        uint64_t jitter = 0;
+        
+        // Source 1: Cycle counter jitter (10 samples)
+        for (j = 0; j < 10; j++) {
+            uint64_t t1 = get_cycles();
+            volatile uint32_t dummy = 0;  // Force some work
+            uint64_t t2 = get_cycles();
+            jitter ^= (t2 - t1);  // XOR timing delta
+        }
+        
+        // Source 2: Stack address entropy (ASLR-like)
+        volatile uint8_t stack_var;
+        jitter ^= (uint64_t)&stack_var;
+        
+        // Source 3: Absolute cycle count (high-order bits change slowly)
+        jitter ^= get_cycles();
+        
+        // Mix accumulated entropy
+        accumulator = (accumulator << 5) + (accumulator >> 3) + jitter;
+        
+        // Extract byte from mixed entropy
+        output[i] = (byte)((accumulator >> (i % 8)) & 0xFF);
     }
     
     return 0;

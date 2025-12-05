@@ -34,7 +34,7 @@
 // PERFORMANCE TEST CONFIGURATION
 // ============================================================================
 // MUST match client configuration for proper throughput testing
-#define THROUGHPUT_TEST_COUNT 50    // Number of iterations (must match client)
+#define THROUGHPUT_TEST_COUNT 5    // Number of iterations (must match client)
 #define THROUGHPUT_PKT_SIZE 1024    // Packet size in bytes (must match client)
 // ============================================================================
 

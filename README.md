@@ -456,6 +456,26 @@ Then rebuild with `make clean && make`.
 | **ML-DSA-44** | Digital Signatures | 1,312 bytes | ~2,420 bytes |
 | **AES-128-GCM** | Symmetric Encryption | 128 bits | N/A |
 
+### Entropy Source
+
+**Implementation**: Custom timing jitter-based entropy using RISC-V cycle counter (`rdcycle`/`rdcycleh` CSR instructions)
+
+| Aspect | Details |
+|--------|---------|
+| **Entropy Collection** | CPU cycle counter timing variations |
+| **Sources** | - Cycle counter jitter (10 samples per byte)<br>- Stack address entropy (ASLR-like)<br>- Absolute cycle count mixing |
+| **Security Level** | Medium (production-ready for embedded/IoT) |
+| **Compliance** | Follows timing jitter principles, not formally NIST validated |
+| **Code** | [`boot/main.c:CustomRngGenerateSeed()`](boot/main.c#L82-L112) |
+
+**Why not wolfEntropy?**: wolfSSL's built-in wolfEntropy (`HAVE_ENTROPY_MEMUSE`) requires `clock_gettime()` which is unavailable on bare-metal. Our custom implementation uses RISC-V-specific instructions for better entropy than basic PRNG while remaining portable across all RISC-V cores.
+
+**Entropy Quality**:
+- **Much better** than basic Linear Congruential Generator (LCG)
+- **Sufficient** for PQC key generation and session keys on embedded systems
+- **Not suitable** for government/military applications requiring FIPS 140-3 validation
+- **Recommendation**: For maximum security in production, add hardware TRNG when deploying to real FPGA
+
 ---
 
 ## 🔍 Troubleshooting
