@@ -35,6 +35,7 @@ boot/main.o
 build
 server/*.o
 server/*.d
+server/server
 boot/wolfssl/src/*.o
 boot/wolfssl/src/*.d
 boot/wolfcrypt/src/*.o
@@ -42,17 +43,4 @@ boot/wolfcrypt/src/*.d
 wolfcrypt/src/*.o 
 wolfcrypt/src/*.d
 
-# Project-specific temporary files
-changes.txt
-changes1.txt
-ideas.txt
-base.txt
-base1.txt
-base2.txt
-ps.txt
-prompt.txt
-changes_network.txt
-cleanup_final.txt
-cleanup_summary.txt
-README_HANDSHAKE.md
-output1.txt
+

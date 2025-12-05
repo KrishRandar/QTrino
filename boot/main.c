@@ -12,7 +12,7 @@
 #include <wolfssl/wolfcrypt/error-crypt.h>
 
 #include "network.h"
-#include "performance.h"  // Performance measurement utilities
+#include "performance.h"  
 
 // Include embedded RPK keys (Raw Public Keys for mutual authentication)
 #include "certs_placeholder.h"
@@ -49,15 +49,9 @@ static perf_metrics_t perf_metrics[2];  // [0] = conn1, [1] = conn2
 #include <sys/time.h>
 #include <time.h>
 
-// ============= ENTROPY SOURCE =============
+// ============= ENTROPY SOURCE ===================================
 // Custom entropy using RISC-V cycle counter timing jitter
-// (wolfEntropy requires clock_gettime() not available on bare-metal)
-//
-// This implementation provides better entropy than simple LCG by:
-// - Using CPU cycle counter timing variations
-// - Collecting timing jitter from multiple samples
-// - Mixing entropy from stack addresses and instruction timing
-// ============================================================================
+// ================================================================
 
 // Read RISC-V 64-bit cycle counter atomically
 static inline uint64_t get_cycles(void) {
@@ -137,10 +131,8 @@ int setitimer(int which, const struct itimerval *restrict new_value, struct itim
 }
 
 
-// Stub for session ticket time checks (wolfSSL needs this for ticket expiration)
+// Stub for session ticket time checks 
 word32 TimeNowInMilliseconds(void) {
-    // Return a constant value since we have no real time
-    // Session tickets won't expire, which is acceptable for our use case
     return 1000;  // Arbitrary non-zero value
 }
 
@@ -159,8 +151,6 @@ unsigned int LowResTimer(void) {
 // This callback is called by wolfSSL to verify the peer's Raw Public Key.
 // Since we use pre-shared public keys, we compare the received RPK with
 // our stored copy of the server's public key.
-// 
-// Per wolfSSL RPK documentation: access strctx->certs->buffer for the RPK data
 // =============================================================================
 static int rpk_verify_callback(int preverify, WOLFSSL_X509_STORE_CTX* store) {
     (void)preverify;  // Not used for RPK
@@ -335,8 +325,6 @@ int main(void)
     printf("[OK] DTLS 1.3 client context created\n");
     
     // Set preferred cipher suite: ChaCha20-Poly1305-SHA256 (optimized for software-only RISC-V)
-    // ChaCha20-Poly1305 is 2-3x faster than AES-GCM on CPUs without AES hardware acceleration
-    // This improves Throughput (20% weight) and CPU Utilization scores
     printf("[CIPHER] Setting preferred cipher suite: TLS13-CHACHA20-POLY1305-SHA256\n");
     ret = wolfSSL_CTX_set_cipher_list(ctx, "TLS13-CHACHA20-POLY1305-SHA256:TLS13-AES-128-GCM-SHA256");
     if (ret != WOLFSSL_SUCCESS) {
@@ -346,13 +334,6 @@ int main(void)
         printf("[OK] ChaCha20-Poly1305-SHA256 set as preferred cipher suite\n");
     }
     printf("\n");
-
-    // Set supported groups (ML-KEM-512)
-    // ret = wolfSSL_CTX_set_groups_list(ctx, "ML-KEM-512");
-    // if (ret != WOLFSSL_SUCCESS) {
-    //     printf("ERROR: Failed to set groups list: %d\n", ret);
-    //     goto cleanup;
-    // }
 
     // Set I/O callbacks for bare-metal networking
     printf("[NETWORK] Registering custom I/O callbacks...\n");
@@ -501,20 +482,7 @@ int main(void)
 
     // wolfSSL_Debugging_ON();  // Disabled for clean output (enable for troubleshooting)
 
-    /*
-     * IMPORTANT:
-     *  - On this 1MHz bare-metal target, DTLS 1.3 + PQC can easily exceed
-     *    normal network timeouts while doing heavy crypto (cert verify,
-     *    Dilithium signatures, etc.).
-     *  - Our recv callback returns WOLFSSL_CBIO_ERR_WANT_READ on timeout,
-     *    which maps to wolfSSL error 323 / WOLFSSL_ERROR_WANT_READ.
-     *  - That is *not* a fatal error; it means "handshake still in progress,
-     *    call wolfSSL_connect() again once more data (or time) is available".
-     *
-     * So we loop wolfSSL_connect() until it either:
-     *  - returns WOLFSSL_SUCCESS, or
-     *  - returns a real fatal error (anything other than WANT_READ/WRITE).
-     */
+
     for (;;) {
         ret = wolfSSL_connect(ssl);
 
@@ -569,7 +537,6 @@ int main(void)
         printf("[PERF] Skipped signature generation/verification (ML-DSA-44)\n");
     } else {
         printf("[SESSION] Full handshake performed\n");
-        // NOTE: Session save moved to AFTER data exchange
         // In DTLS 1.3, NewSessionTicket arrives after handshake completes
     }
     
@@ -647,8 +614,6 @@ int main(void)
         printf("[DATA] Decrypted message: \"%s\"\n", recv_buf);
 
     // ========== SAVE SESSION AFTER DATA EXCHANGE ==========
-    // In DTLS 1.3, NewSessionTicket arrives AFTER handshake
-    // We need to give it time to arrive and be processed
     if (!wolfSSL_session_reused(ssl) && !saved_session) {
         printf("\n[SESSION] Saving session for future resumption...\n");
         saved_session = wolfSSL_get1_session(ssl);
@@ -676,7 +641,6 @@ int main(void)
     printf("[INFO] Measuring one-way TX throughput (client -> server)\n");
     printf("\n");
     
-    // Configuration already defined at top of file
     
     uint8_t tput_buffer[THROUGHPUT_PKT_SIZE];
     memset(tput_buffer, 0xAA, sizeof(tput_buffer));  // Fill with test pattern
@@ -747,7 +711,6 @@ int main(void)
             wolfSSL_free(ssl);
             ssl = NULL;
             
-            // Accurate 3-second delay using cycle counter (1MHz = 1M cycles/sec)
             printf("[TEST] Waiting 3 seconds before next connection...\n");
             {
                 uint64_t delay_start = perf_get_cycles();
@@ -813,13 +776,13 @@ int main(void)
         printf("[ANALYSIS] Performance Insights:\n");
         if (lat2_ms < lat1_ms) {
             uint32_t speedup = lat1_ms / lat2_ms;
-            printf("  ✓ Session resumption is %lux faster\n", (unsigned long)speedup);
-            printf("  ✓ Saved %lu milliseconds by skipping PQC operations\n",
+            printf("   Session resumption is %lux faster\n", (unsigned long)speedup);
+            printf("   Saved %lu milliseconds by skipping PQC operations\n",
                    (unsigned long)(lat1_ms - lat2_ms));
         } else {
-            printf("  ⚠ Session resumption did not provide speedup\n");
-            printf("  ⚠ Both connections performed full PQC handshake\n");
-            printf("  ℹ This is the known wolfSSL DTLS 1.3 HRR cookie issue\n");
+            printf("   Session resumption did not provide speedup\n");
+            printf("   Both connections performed full PQC handshake\n");
+            printf("   This is the known wolfSSL DTLS 1.3 HRR cookie issue\n");
         }
         printf("\n");
         

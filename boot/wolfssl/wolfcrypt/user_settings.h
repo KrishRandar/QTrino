@@ -2,10 +2,6 @@
 #define USER_SETTINGS_H
 
 // ============= SESSION CACHE CONTROL =============
-// NOTE: settings.h will try to auto-define NO_SESSION_CACHE and NO_CLIENT_CACHE
-// due to NO_ASN_TIME. We override this via Makefile CFLAGS (-UNO_SESSION_CACHE)
-// Do NOT define them here - let the Makefile -U flags handle it
-
 // WOLFCRYPT_ONLY removed - enabling full DTLS 1.3 support
 
 #define WOLFSSL_SP_MATH // maths backend for crypto
@@ -33,8 +29,6 @@ unsigned int LowResTimer(void);
 #define NO_WRITEV
 #define WOLFSSL_USER_IO
 #define WOLFSSL_SMALL_STACK         // Optimize for small stack usage
-// #define WOLFSSL_SMALL_CERT_VERIFY   // DISABLED - incompatible with RPK (RFC 7250)
-                                       // wc_CheckCertSignature expects X.509, not SubjectPublicKeyInfo
 #define NO_FILESYSTEM               // Don't use file system
 #define NO_WOLFSSL_DIR              // Don't use directory access
 #define NO_WOLFSSL_DIR              // Don't use directory access
@@ -97,8 +91,6 @@ unsigned int LowResTimer(void);
 #define HAVE_SHA384
 #define WOLFSSL_AES_128              // Required for AES-128-GCM-SHA256
 #define WOLFSSL_AES_128_GCM_SHA256   // TLS_AES_128_GCM_SHA256 (fallback)
-// NOTE: AES-256 disabled - ChaCha20-Poly1305 preferred for software-only RISC-V performance
-// NOTE: ECC, X25519, ED25519 disabled by NOT defining HAVE_ECC, HAVE_X25519, etc.
 
 // ============= REQUIRED HASH FUNCTIONS =============
 #define WOLFSSL_SHA256               // General use
@@ -131,12 +123,11 @@ unsigned int LowResTimer(void);
 
 // ============= RAW PUBLIC KEY (RPK) SUPPORT =============
 // RFC 7250 - Using Raw Public Keys in TLS/DTLS
-// Replaces X.509 certificates with lightweight SubjectPublicKeyInfo
 #define HAVE_RPK                     // Enable Raw Public Key support
 #define WOLFSSL_ALWAYS_VERIFY_CB     // Always call verify callback (needed for RPK verification)
 
 // ============= X.509 CERTIFICATE SUPPORT (MINIMAL) =============
-// Still needed for ASN.1 parsing of SubjectPublicKeyInfo in RPK
+// needed for ASN.1 parsing of SubjectPublicKeyInfo in RPK
 #define WOLFSSL_ASN_TEMPLATE         // ASN.1 template parsing
 
 // ============= KEY DERIVATION =============
@@ -150,17 +141,10 @@ unsigned int LowResTimer(void);
 
 // ============= PRODUCTION ENTROPY SOURCE =============
 // Custom RNG using RISC-V cycle counter for timing jitter
-// wolfEntropy (HAVE_ENTROPY_MEMUSE) requires clock_gettime() which is not
-// available on bare-metal, so we use a custom seed generator instead.
-// This provides better entropy than basic LCG by using CPU timing jitter.
 extern int CustomRngGenerateSeed(unsigned char *, unsigned int);
 #define CUSTOM_RAND_GENERATE_SEED CustomRngGenerateSeed
-
-// Disable /dev/random (not available on bare-metal)
 #define NO_DEV_RANDOM
-
-// Session tickets enabled via Makefile -UNO_SESSION_CACHE flag
-
+// ============= SESSION TICKET HANDLING =============
 // Disable default ticket encryption callback (it requires time functions we don't have)
 // We'll need to provide a custom callback or let wolfSSL handle it differently
 #define WOLFSSL_NO_DEF_TICKET_ENC_CB
