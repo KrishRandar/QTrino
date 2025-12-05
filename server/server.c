@@ -45,7 +45,7 @@
 // The 1MHz LiteX client takes ~3 seconds to process each packet
 // CRITICAL: 500ms was too fast - client drops packets while processing!
 // Increased to 3000ms to match client's actual processing speed
-#define SEND_PACING_MS 1750
+#define SEND_PACING_MS 3500
 
 // Quick timeout multiplier for DTLS 1.3
 #define QUICK_MULT  4
