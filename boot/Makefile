@@ -12,7 +12,7 @@ WOLFCRYPT_SRCS = $(wildcard wolfcrypt/src/*.c)
 WOLFSSL_SRCS = $(wildcard wolfssl/src/*.c)
 
 # Main objects
-OBJECTS  = crt0.o main.o network.o
+OBJECTS  = crt0.o main.o network.o performance.o
 
 # Add wolfcrypt and wolfssl objects
 OBJECTS += $(WOLFCRYPT_SRCS:.c=.o)
@@ -34,6 +34,11 @@ vpath %.a $(PACKAGES:%=../%)
 
 CFLAGS += $(INC) 
 CFLAGS += -DWOLFSSL_USER_SETTINGS
+
+# Force enable session cache by undefining the blockers
+# settings.h auto-defines these due to NO_ASN_TIME, we override at compile time
+CFLAGS += -UNO_SESSION_CACHE
+CFLAGS += -UNO_CLIENT_CACHE
 
 boot.elf: $(OBJECTS)
 	$(CC) $(LDFLAGS) -T linker.ld -N -o $@ \

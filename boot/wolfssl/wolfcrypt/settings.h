@@ -4270,16 +4270,22 @@ extern void uITRON4_free(void *p) ;
 #endif
 
 /* The client session cache requires time for timeout */
+/* PATCHED FOR BARE-METAL SESSION RESUMPTION:
+ * Commenting out auto-disable of session cache when NO_ASN_TIME is set.
+ * We accept that session tickets won't have proper time-based expiration.
 #if defined(NO_ASN_TIME) && !defined(NO_SESSION_CACHE)
     #define NO_SESSION_CACHE
 #endif
+*/
 
 #if defined(NO_ASN_TIME) && !defined(WOLFSSL_NO_DEF_TICKET_ENC_CB)
     #define WOLFSSL_NO_DEF_TICKET_ENC_CB
 #endif
+/* PATCHED: Commented out auto-undef of HAVE_SESSION_TICKET
 #if defined(NO_ASN_TIME) && defined(HAVE_SESSION_TICKET)
     #undef HAVE_SESSION_TICKET
 #endif
+*/
 
 /* Use static ECC structs for Position Independent Code (PIC) */
 #if defined(__IAR_SYSTEMS_ICC__) && defined(__ROPI__)

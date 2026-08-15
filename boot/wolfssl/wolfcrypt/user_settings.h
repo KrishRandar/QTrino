@@ -1,6 +1,7 @@
 #ifndef USER_SETTINGS_H
 #define USER_SETTINGS_H
 
+// ============= SESSION CACHE CONTROL =============
 // WOLFCRYPT_ONLY removed - enabling full DTLS 1.3 support
 
 #define WOLFSSL_SP_MATH // maths backend for crypto
@@ -28,8 +29,6 @@ unsigned int LowResTimer(void);
 #define NO_WRITEV
 #define WOLFSSL_USER_IO
 #define WOLFSSL_SMALL_STACK         // Optimize for small stack usage
-// #define WOLFSSL_SMALL_CERT_VERIFY   // DISABLED - incompatible with RPK (RFC 7250)
-                                       // wc_CheckCertSignature expects X.509, not SubjectPublicKeyInfo
 #define NO_FILESYSTEM               // Don't use file system
 #define NO_WOLFSSL_DIR              // Don't use directory access
 #define NO_WOLFSSL_DIR              // Don't use directory access
@@ -90,9 +89,8 @@ unsigned int LowResTimer(void);
 #define HAVE_AESGCM
 #define HAVE_SHA256
 #define HAVE_SHA384
-#define WOLFSSL_AES_128_GCM_SHA256   // TLS_AES_128_GCM_SHA256
-#define WOLFSSL_AES_256_GCM_SHA384   // TLS_AES_256_GCM_SHA384isable old TLS versions
-// NOTE: ECC, X25519, ED25519 disabled by NOT defining HAVE_ECC, HAVE_X25519, etc.
+#define WOLFSSL_AES_128              // Required for AES-128-GCM-SHA256
+#define WOLFSSL_AES_128_GCM_SHA256   // TLS_AES_128_GCM_SHA256 (fallback)
 
 // ============= REQUIRED HASH FUNCTIONS =============
 #define WOLFSSL_SHA256               // General use
@@ -125,12 +123,11 @@ unsigned int LowResTimer(void);
 
 // ============= RAW PUBLIC KEY (RPK) SUPPORT =============
 // RFC 7250 - Using Raw Public Keys in TLS/DTLS
-// Replaces X.509 certificates with lightweight SubjectPublicKeyInfo
 #define HAVE_RPK                     // Enable Raw Public Key support
 #define WOLFSSL_ALWAYS_VERIFY_CB     // Always call verify callback (needed for RPK verification)
 
 // ============= X.509 CERTIFICATE SUPPORT (MINIMAL) =============
-// Still needed for ASN.1 parsing of SubjectPublicKeyInfo in RPK
+// needed for ASN.1 parsing of SubjectPublicKeyInfo in RPK
 #define WOLFSSL_ASN_TEMPLATE         // ASN.1 template parsing
 
 // ============= KEY DERIVATION =============
@@ -142,7 +139,14 @@ unsigned int LowResTimer(void);
 #define SHOW_GEN
 #define DEBUG_WOLFSSL_VERBOSE
 
-extern int CustomRngGenerateBlock(unsigned char *, unsigned int);
-#define CUSTOM_RAND_GENERATE_SEED CustomRngGenerateBlock
+// ============= PRODUCTION ENTROPY SOURCE =============
+// Custom RNG using RISC-V cycle counter for timing jitter
+extern int CustomRngGenerateSeed(unsigned char *, unsigned int);
+#define CUSTOM_RAND_GENERATE_SEED CustomRngGenerateSeed
+#define NO_DEV_RANDOM
+// ============= SESSION TICKET HANDLING =============
+// Disable default ticket encryption callback (it requires time functions we don't have)
+// We'll need to provide a custom callback or let wolfSSL handle it differently
+#define WOLFSSL_NO_DEF_TICKET_ENC_CB
 
 #endif // USER_SETTINGS_H

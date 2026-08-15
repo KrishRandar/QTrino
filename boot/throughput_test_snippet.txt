@@ -1,0 +1,63 @@
+// ============= THROUGHPUT TESTING =============
+// This code should be inserted after initial data exchange in main.c
+// Insert after line ~569 (after printf(\"\\n\");)
+
+printf(\"===============================================================================\\n\");
+printf(\"                    THROUGHPUT PERFORMANCE TEST\\n\");
+printf(\"===============================================================================\\n\");
+printf(\"[INFO] Testing sustained data transfer rate (50 iterations)\\n\");
+printf(\"[INFO] Packet size: 1024 bytes (send + receive echo)\\n\");
+printf(\"\\n\");
+
+#define THROUGHPUT_TEST_COUNT 50
+#define THROUGHPUT_PKT_SIZE 1024
+
+uint8_t tput_buffer[THROUGHPUT_PKT_SIZE];
+memset(tput_buffer, 0xAA, sizeof(tput_buffer));  // Fill with test pattern
+
+perf_metrics[conn_idx].throughput_iterations = THROUGHPUT_TEST_COUNT;
+perf_metrics[conn_idx].throughput_bytes = 0;
+perf_metrics[conn_idx].throughput_start = perf_get_cycles();
+
+int successful_iterations = 0;
+for (int i = 0; i < THROUGHPUT_TEST_COUNT; i++) {
+    // Send data
+    ret = wolfSSL_write(ssl, tput_buffer, THROUGHPUT_PKT_SIZE);
+    if (ret <= 0) {
+        printf(\"[ERROR] Throughput test write failed at iteration %d\\n\", i);
+        break;
+    }
+    
+    // Receive echo
+    ret = wolfSSL_read(ssl, tput_buffer, THROUGHPUT_PKT_SIZE);
+    if (ret <= 0) {
+        printf(\"[ERROR] Throughput test read failed at iteration %d\\n\", i);
+        break;
+    }
+    
+    perf_metrics[conn_idx].throughput_bytes += (THROUGHPUT_PKT_SIZE * 2);  // Send + receive
+    successful_iterations++;
+    
+    // Progress indicator every 10 iterations
+    if ((i + 1) % 10 == 0) {
+        printf(\"[PROGRESS] %d/%d iterations complete\\n\", i + 1, THROUGHPUT_TEST_COUNT);
+    }
+}
+
+perf_metrics[conn_idx].throughput_end = perf_get_cycles();
+
+// Calculate throughput
+uint64_t tput_cycles = perf_metrics[conn_idx].throughput_end - 
+                       perf_metrics[conn_idx].throughput_start;
+float tput_sec = perf_cycles_to_sec(tput_cycles);
+perf_metrics[conn_idx].throughput_bps = 
+    (tput_sec > 0) ? (perf_metrics[conn_idx].throughput_bytes / tput_sec) : 0;
+
+printf(\"\\n\");
+printf(\"[PERF] Throughput test complete!\\n\");
+printf(\"[PERF] Successful iterations: %d/%d\\n\", successful_iterations, THROUGHPUT_TEST_COUNT);
+printf(\"[PERF] Total bytes transferred: %u\\n\", perf_metrics[conn_idx].throughput_bytes);
+printf(\"[PERF] Time elapsed: %.2f seconds\\n\", tput_sec);
+printf(\"[PERF] Throughput: %.2f bytes/sec\\n\", perf_metrics[conn_idx].throughput_bps);
+printf(\"===============================================================================\\n\");
+printf(\"\\n\");

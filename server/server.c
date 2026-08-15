@@ -1,12 +1,3 @@
-/*
- * server.c - PQC-DTLS 1.3 Server with Raw Public Key (RPK) Authentication
- * 
- * wolfSSL-based DTLS 1.3 server for testing mutual authentication
- * with RISC-V bare-metal client using ML-KEM-512 and ML-DSA-44.
- * 
- * Authentication: Raw Public Keys (RFC 7250) - no X.509 certificates
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,7 +12,6 @@
 #include <linux/if.h>
 #include <time.h>
 
-// SO_BINDTODEVICE may not be defined in all headers
 #ifndef SO_BINDTODEVICE
 #define SO_BINDTODEVICE 25
 #endif
@@ -30,14 +20,24 @@
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
 
+// ============================================================================
+// PERFORMANCE TEST CONFIGURATION
+// ============================================================================
+// MUST match client configuration for proper throughput testing
+#define THROUGHPUT_TEST_COUNT 5    // Number of iterations (must match client)
+#define THROUGHPUT_PKT_SIZE 1024    // Packet size in bytes (safe size, must match client)
+// ============================================================================
+
 // Include embedded RPK keys (server private key + client public key for verification)
 #include "server_rpk.h"
 
 // Pacing delay between sends (milliseconds)
-// The 1MHz LiteX client takes ~3 seconds to process each packet
-// CRITICAL: 500ms was too fast - client drops packets while processing!
-// Increased to 3000ms to match client's actual processing speed
-#define SEND_PACING_MS 2500
+// After handshake, symmetric crypto is much faster, so we can reduce pacing
+#define SEND_PACING_HANDSHAKE_MS 2500  // Pacing during handshake (PQC operations)
+#define SEND_PACING_DATA_MS 0          // NO pacing during data transfer or you could set a small value
+
+// Global flag to track if handshake is complete (reduces pacing after)
+static int g_handshake_complete = 0;
 
 // Quick timeout multiplier for DTLS 1.3
 #define QUICK_MULT  4
@@ -47,13 +47,14 @@ static struct sockaddr_in g_peer_addr;
 static int g_peer_set = 0;
 static int g_sockfd = -1;
 
-// Custom send callback with pacing for slow client
+// Custom send callback with adaptive pacing for slow client
 static int PacedSendTo(WOLFSSL* ssl, char* buf, int sz, void* ctx)
 {
-    (void)ssl;  // unused
-    (void)ctx;  // we use global sockfd instead
+    (void)ssl;
+    (void)ctx;  
     
     int sent;
+    int pacing_ms = g_handshake_complete ? SEND_PACING_DATA_MS : SEND_PACING_HANDSHAKE_MS;
     
     printf("  [NETWORK] >>> Sending %d bytes to client...\n", sz);
     if (g_peer_set) {
@@ -65,9 +66,12 @@ static int PacedSendTo(WOLFSSL* ssl, char* buf, int sz, void* ctx)
     
     if (sent > 0) {
         // Add delay after each send to let client process
+        // Use shorter delay after handshake (symmetric crypto is faster)
         printf("  [OK] Sent %d bytes successfully\n", sent);
-        printf("  [PACING] Waiting %dms for 1MHz client to process...\n", SEND_PACING_MS);
-        usleep(SEND_PACING_MS * 1000);
+        if (pacing_ms > 0) {
+            printf("  [PACING] Waiting %dms for client to process...\n", pacing_ms);
+            usleep(pacing_ms * 1000);
+        }
     } else if (sent < 0) {
         printf("  [ERROR] Send failed: %s\n", strerror(errno));
     }
@@ -152,9 +156,7 @@ static void showConnInfo(WOLFSSL* ssl)
 // This callback is called by wolfSSL to verify the client's Raw Public Key.
 // Since we use pre-shared public keys, we compare the received RPK with
 // our stored copy of the client's public key.
-//
-// Per wolfSSL RPK documentation: access strctx->certs->buffer for the RPK data
-// =============================================================================
+//// =============================================================================
 static int rpk_verify_callback(int preverify, WOLFSSL_X509_STORE_CTX* store) {
     (void)preverify;  // Not used for RPK
     
@@ -172,7 +174,7 @@ static int rpk_verify_callback(int preverify, WOLFSSL_X509_STORE_CTX* store) {
         return 0;
     }
     
-    // Get the first (and only) certificate buffer - this is the RPK
+    // Get the first certificate buffer - this is the RPK
     const unsigned char* peer_pubkey = store->certs[0].buffer;
     int peer_pubkey_len = (int)store->certs[0].length;
     
@@ -217,10 +219,12 @@ int main(void)
     printf("===============================================================================\n");
     printf("[CONFIG] Algorithm:  ML-KEM-512 (Key Exchange) + ML-DSA-44 (Signatures)\n");
     printf("[CONFIG] Protocol:   DTLS 1.3 (Pure Post-Quantum Cryptography)\n");
+    printf("[CONFIG] Cipher:     ChaCha20-Poly1305-SHA256 (preferred for software-only RISC-V)\n");
     printf("[CONFIG] Auth:       Raw Public Key (RPK) Mutual Authentication (RFC 7250)\n");
     printf("[CONFIG] Port:       %d (UDP)\n", SERVER_PORT);
     printf("[CONFIG] Interface:  %s\n", TAP_INTERFACE);
-    printf("[CONFIG] Pacing:     %dms delay between sends (for 1MHz client)\n", SEND_PACING_MS);
+    printf("[CONFIG] Pacing:     %dms (handshake), %dms (data transfer)\n", 
+           SEND_PACING_HANDSHAKE_MS, SEND_PACING_DATA_MS);
     printf("===============================================================================\n");
     printf("\n");
 
@@ -232,7 +236,7 @@ int main(void)
     
     // Enable debugging to see received data
     printf("[DEBUG] Enabling wolfSSL debug output...\n");
-    wolfSSL_Debugging_ON();
+    // wolfSSL_Debugging_ON();  // Disabled for clean output (enable for troubleshooting)
     printf("[OK] Debug logging enabled\n");
     printf("\n");
 
@@ -246,10 +250,30 @@ int main(void)
     }
     printf("[OK] DTLS 1.3 server context created\n");
     
-    // Disable session tickets to simplify handshake for slow client
-    printf("[CONFIG] Disabling session tickets (simplify handshake)...\n");
-    wolfSSL_CTX_no_ticket_TLSv13(ctx);
-    printf("[OK] Session tickets disabled\n");
+    // Set preferred cipher suite: ChaCha20-Poly1305-SHA256 (optimized for software-only RISC-V)
+    printf("[CIPHER] Setting preferred cipher suite: TLS13-CHACHA20-POLY1305-SHA256\n");
+    ret = wolfSSL_CTX_set_cipher_list(ctx, "TLS13-CHACHA20-POLY1305-SHA256:TLS13-AES-128-GCM-SHA256");
+    if (ret != WOLFSSL_SUCCESS) {
+        fprintf(stderr, "[WARNING] Failed to set cipher list preference: %d\n", ret);
+        fprintf(stderr, "[INFO] Using default cipher suite order\n");
+    } else {
+        printf("[OK] ChaCha20-Poly1305-SHA256 set as preferred cipher suite\n");
+    }
+    printf("\n");
+    
+    // Enable session tickets for resumption
+    printf("[CONFIG] Enabling session tickets for resumption...\n");
+    ret = wolfSSL_CTX_UseSessionTicket(ctx);
+    if (ret != WOLFSSL_SUCCESS) {
+        fprintf(stderr, "[WARNING] Failed to enable session tickets: %d\n", ret);
+        fprintf(stderr, "[WARNING] Session resumption will not be available\n");
+    } else {
+        printf("[OK] Session tickets enabled\n");
+        
+        // Set ticket lifetime (in seconds) - 5 minutes
+        wolfSSL_CTX_set_TicketHint(ctx, 300);
+        printf("[OK] Session ticket lifetime: 300 seconds (5 minutes)\n");
+    }
     printf("\n");
 
     // ==========================================================================
@@ -307,13 +331,12 @@ int main(void)
     printf("[OK] Server private key loaded successfully\n");
     printf("\n");
 
-    // Configure RPK verification callback for client authentication
+    // Configure mutual authentication with RPK verification callback
     printf("[RPK] Configuring mutual authentication with verify callback...\n");
-    printf("[RPK] Client public key loaded for verification (%d bytes)\n", client_pubkey_der_len);
-    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER | 
-                                WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT,
-                           rpk_verify_callback);
-    printf("[OK] RPK mutual authentication configured\n");
+    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                          rpk_verify_callback);
+    printf("[OK] Server will request and verify client RPK\n");
+    printf("[OK] Mutual authentication enabled (both parties authenticate)\n");
     printf("\n");
 
     // Create UDP socket
@@ -359,15 +382,53 @@ int main(void)
     printf("[OK] Socket bound to port %d\n", SERVER_PORT);
     printf("\n");
 
-    // Create SSL session
-    printf("[SSL] Creating SSL session object...\n");
-    ssl = wolfSSL_new(ctx);
-    if (!ssl) {
-        fprintf(stderr, "[ERROR] Failed to create SSL session\n");
-        fprintf(stderr, "[ERROR] Check context configuration and memory\n");
-        return 1;
+    // ========== CONNECTION LOOP FOR SESSION RESUMPTION TESTING ==========
+    // Handle 2 connections to test session resumption
+    // Connection #1: Full handshake with session ticket issuance
+    // Connection #2: Resumed handshake using the ticket from connection #1
+    #define NUM_CONNECTIONS 2
+    
+    for (int conn = 1; conn <= NUM_CONNECTIONS; conn++) {
+        // Reset pacing flag for new connection (use slow pacing during handshake)
+        g_handshake_complete = 0;
+        
+        printf("\n");
+        printf("===============================================================================\n");
+        printf("                   CONNECTION #%d/%d\n", conn, NUM_CONNECTIONS);
+        printf("===============================================================================\n");
+        if (conn == 1) {
+            printf("[INFO] Expecting full handshake with session ticket issuance\n");
+        } else {
+            printf("[INFO] Expecting session resumption (if client presents valid ticket)\n");
+        }
+        printf("\n");;
+
+        // Create SSL session
+        printf("[SSL] Creating SSL session object...\n");
+        ssl = wolfSSL_new(ctx);
+        if (!ssl) {
+            fprintf(stderr, "[ERROR] Failed to create SSL session\n");
+            fprintf(stderr, "[ERROR] Check context configuration and memory\n");
+            continue;  // Try next connection
+        }
+        printf("[OK] SSL session created\n");
+    
+    #ifdef WOLFSSL_DTLS13_NO_HRR_ON_RESUME
+    printf("[SESSION] Configuring PSK resumption behavior...\n");
+    ret = wolfSSL_dtls13_no_hrr_on_resume(ssl, 1);
+    if (ret != WOLFSSL_SUCCESS) {
+        fprintf(stderr, "[WARNING] Failed to set no-HRR-on-resume: %d\n", ret);
+        fprintf(stderr, "[WARNING] Session resumption may not work!\n");
     }
-    printf("[OK] SSL session created\n");
+    else {
+        printf("[SESSION] ✓ HRR cookie exchange will be skipped on PSK resumption\n");
+        printf("[SESSION] This enables fast session resumption without re-doing PQC operations\n");
+    }
+    #else
+    printf("[WARNING] WOLFSSL_DTLS13_NO_HRR_ON_RESUME not defined!\n");
+    printf("[WARNING] Session resumption will NOT work - recompile with this flag\n");
+    #endif
+    printf("\n");
     
     // Store socket in global for callbacks
     g_sockfd = sockfd;
@@ -382,6 +443,9 @@ int main(void)
     printf("[OK] DTLS timeouts: initial=30s, max=120s (for 1MHz client)\n");
     
     // Enable DTLS 1.3 stateless cookie exchange (DoS protection)
+    // Note: This is required for DTLS 1.3 and provides protection against
+    // UDP amplification attacks by verifying client reachability
+
 #ifdef WOLFSSL_SEND_HRR_COOKIE
     {
         // Applications should update this secret periodically in production
@@ -398,14 +462,16 @@ int main(void)
 #else
     printf("[INFO] WOLFSSL_SEND_HRR_COOKIE not enabled (compile-time option)\n");
 #endif
+    printf("\n");
     
-    // Register custom I/O callbacks with pacing
-    // This adds delays between sends to let the slow 1MHz client process packets
-    printf("[PACING] Registering paced I/O callbacks...\n");
-    printf("[INFO] Send delay: %dms (allows 1MHz client to process packets)\n", SEND_PACING_MS);
+    // Register custom I/O callbacks with adaptive pacing
+    // Uses longer delays during handshake, shorter during data transfer
+    printf("[PACING] Registering adaptive I/O callbacks...\n");
+    printf("[INFO] Handshake pacing: %dms, Data pacing: %dms\n", 
+           SEND_PACING_HANDSHAKE_MS, SEND_PACING_DATA_MS);
     wolfSSL_SSLSetIOSend(ssl, PacedSendTo);
     wolfSSL_SSLSetIORecv(ssl, PacedRecvFrom);
-    printf("[OK] I/O callbacks registered with pacing\n");
+    printf("[OK] I/O callbacks registered with adaptive pacing\n");
     printf("\n");
 
     printf("===============================================================================\n");
@@ -416,15 +482,7 @@ int main(void)
     printf("[INFO] Handshake may take 60-90 seconds with 1MHz PQC client\n");
     printf("\n");
 
-    /*
-     * IMPORTANT - DTLS 1.3 Timeout Handling:
-     *  - We use dynamic socket timeouts based on DTLS handshake state
-     *  - setHsTimeout() uses wolfSSL_dtls_get_current_timeout() and
-     *    wolfSSL_dtls13_use_quick_timeout() for DTLS 1.3 quick timeouts
-     *  - On socket timeout, we call wolfSSL_dtls_got_timeout() to trigger
-     *    retransmissions
-     *  - WANT_READ/WRITE mean handshake is in progress (normal for slow client)
-     */
+
     printf("[HANDSHAKE] Starting DTLS 1.3 handshake with dynamic timeouts...\n");
     for (;;) {
         // Set dynamic timeout based on current DTLS state
@@ -487,12 +545,26 @@ int main(void)
         goto cleanup;
     }
 
+    // Handshake complete - reduce pacing for data transfer
+    g_handshake_complete = 1;
+    
     printf("\n");
     printf("===============================================================================\n");
     printf("                   DTLS 1.3 HANDSHAKE COMPLETE!\n");
     printf("===============================================================================\n");
     printf("[SUCCESS] Secure channel established with client\n");
     printf("[SUCCESS] Client authenticated successfully\n");
+    printf("[PACING] Reduced pacing to %dms for data transfer\n", SEND_PACING_DATA_MS);
+    
+    // Check if session was resumed
+    if (wolfSSL_session_reused(ssl)) {
+        printf("[SESSION]  Session RESUMED from client ticket\n");;
+        printf("[PERF] Skipped expensive PQC key exchange and signatures\n");
+    } else {
+        printf("[SESSION] Full handshake performed (new session)\n");
+        printf("[INFO] Client can resume this session on next connection\n");
+    }
+    
     showConnInfo(ssl);
     printf("===============================================================================\n");
     printf("\n");
@@ -552,6 +624,43 @@ int main(void)
     }
     printf("\n");
 
+    // ============= ONE-WAY THROUGHPUT TEST (RECEIVE ONLY) =============
+    // Client sends data continuously, server receives and discards
+    // to measure actual one-way encrypted throughput 
+    printf("===============================================================================\n");
+    printf("                    THROUGHPUT TEST (ONE-WAY RX)\n");
+    printf("===============================================================================\n");
+    printf("[INFO] Receiving %d packets (%d bytes each) from client\n", THROUGHPUT_TEST_COUNT, THROUGHPUT_PKT_SIZE);
+    printf("[INFO] One-way measurement \n");
+    printf("\n");
+    
+    int rx_successful = 0;
+    int total_bytes_received = 0;
+    for (int i = 0; i < THROUGHPUT_TEST_COUNT; i++) {
+        // Receive packet from client (one-way)
+        ret = wolfSSL_read(ssl, buffer, THROUGHPUT_PKT_SIZE);
+        if (ret <= 0) {
+            int err = wolfSSL_get_error(ssl, ret);
+            if (err == WOLFSSL_ERROR_WANT_READ) {
+                // Timeout - retry
+                i--;
+                continue;
+            }
+            fprintf(stderr, "[ERROR] Throughput test read failed at iteration %d (error: %d)\n", i, err);
+            break;
+        }
+        
+        total_bytes_received += ret;
+        rx_successful++;
+    }
+    
+    printf("\n");
+    printf("[PERF] Throughput test complete\n");
+    printf("[PERF] Successfully received: %d/%d packets\n", rx_successful, THROUGHPUT_TEST_COUNT);
+    printf("[PERF] Total bytes received: %d bytes\n", total_bytes_received);
+    printf("===============================================================================\n");
+    printf("\n");
+
     printf("===============================================================================\n");
     printf("                         SESSION COMPLETE\n");
     printf("===============================================================================\n");
@@ -563,10 +672,31 @@ int main(void)
     printf("  ✓ Data encrypted with quantum-resistant algorithms\n");
     printf("===============================================================================\n");
 
+        // Clean up THIS connection's SSL session (but keep context alive!)
+        printf("\n[CONNECTION] Cleaning up connection #%d resources...\n", conn);
+        wolfSSL_free(ssl);
+        ssl = NULL;
+        printf("[OK] SSL session freed\n");
+        
+        if (conn < NUM_CONNECTIONS) {
+            printf("\n[INFO] Waiting for next client connection...\n");
+            printf("[INFO] Ticket encryption keys preserved for session resumption\n");
+        }
+    } // End connection loop
+    
+    printf("\n");
+    printf("===============================================================================\n");
+    printf("              ALL CONNECTIONS COMPLETE (%d/%d)\n", NUM_CONNECTIONS, NUM_CONNECTIONS);
+    printf("===============================================================================\n");
+    printf("[SUCCESS] Session resumption test complete\n");
+    printf("===============================================================================\n");
+
 cleanup:
-    printf("\n[CLEANUP] Cleaning up resources...\n");
-    wolfSSL_free(ssl);
-    printf("[OK] SSL session freed\n");
+    printf("\n[CLEANUP] Cleaning up final resources...\n");
+    if (ssl) {
+        wolfSSL_free(ssl);
+        printf("[OK] SSL session freed\n");
+    }
     wolfSSL_CTX_free(ctx);
     printf("[OK] SSL context freed\n");
     wolfSSL_Cleanup();

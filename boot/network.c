@@ -26,7 +26,7 @@ static uint8_t my_mac[6] = {0x10, 0xe2, 0xd5, 0x00, 0x00, 0x00};
 // Receive buffer queue (Ring Buffer)
 // We need to buffer multiple packets because PQC certificates arrive in bursts
 // of fragments, and a single buffer would cause drops while processing.
-#define RX_QUEUE_SIZE 64   // Increased from 16 to handle server bursts
+#define RX_QUEUE_SIZE 64   
 #define RX_BUF_SIZE   2048
 
 static uint8_t rx_queue[RX_QUEUE_SIZE][RX_BUF_SIZE];
@@ -53,7 +53,6 @@ static void udp_rx_callback(uint32_t src_ip, uint16_t src_port,
         }
     } else {
         // Queue full - packet dropped!
-        // printf("!"); // Minimal debug marker for drop
     }
 }
 
@@ -68,7 +67,6 @@ void network_init(void) {
     rx_tail = 0;
     
     // Start UDP stack (initializes Ethernet MAC)
-    // udp_start() clears the callback, so we must set it AFTER
     udp_start(my_mac, LOCAL_IP);
     
     // Register callback for incoming packets
@@ -106,10 +104,6 @@ int network_send(const uint8_t* data, int len) {
 
 // RECEIVE UDP PACKET
 int network_recv(uint8_t* buffer, int max_len, int timeout_ms) {
-    // Simple busy-wait timeout calibration for ~1MHz CPU
-    // At 1MHz, each loop iteration takes ~50 cycles, so:
-    // 1000ms / (50 cycles * 1us/cycle) = 1000ms / 50us = 20000 iterations/sec
-    // So timeout_ms * 20 gives roughly correct timing
     volatile int timeout_counter = timeout_ms * 20; 
     
     while (timeout_counter > 0) {
